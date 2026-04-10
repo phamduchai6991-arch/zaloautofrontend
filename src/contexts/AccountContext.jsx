@@ -497,6 +497,46 @@ export function AccountProvider({ children }) {
     return extensionPatch;
   }, [accounts, activeAccountIndex, refreshAccountSessionFromExtension, updateAccountById]);
 
+  const refreshAccountViaBackend = useCallback(async () => {
+    const acct = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
+    if (!acct || !hasStoredSession(acct)) return null;
+
+    const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+    if (!API_BASE) return null;
+
+    const res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: acct }),
+    });
+
+    const result = await res.json();
+    if (!result?.ok || !result.data) {
+      throw new Error(result?.error || 'Backend không thể đồng bộ tài khoản.');
+    }
+
+    const d = result.data;
+    const patch = {
+      name: d.profile?.displayName || d.profile?.zaloName || acct.name,
+      avatar: d.profile?.avatar || acct.avatar,
+      phone: d.profile?.phoneNumber || acct.phone,
+      friends: Array.isArray(d.friends) ? d.friends : acct.friends,
+      groups: Array.isArray(d.groups) ? d.groups : acct.groups,
+      sentFriendRequests: Array.isArray(d.sentFriendRequests) ? d.sentFriendRequests : acct.sentFriendRequests,
+      receivedFriendRequests: Array.isArray(d.receivedFriendRequests) ? d.receivedFriendRequests : acct.receivedFriendRequests,
+      serviceSyncedAt: d.syncedAt || new Date().toISOString(),
+      syncStatus: 'ready',
+    };
+
+    updateAccountById(acct.id, patch);
+    if (patch.friends.length) setFriends(patch.friends);
+    if (patch.groups.length) setGroups(patch.groups);
+    setSentFriendRequests(patch.sentFriendRequests);
+    setReceivedFriendRequests(patch.receivedFriendRequests);
+
+    return patch;
+  }, [accounts, activeAccountIndex, updateAccountById]);
+
   const value = {
     extensionActive,
     extensionChecked,
@@ -517,6 +557,7 @@ export function AccountProvider({ children }) {
     cancelPendingSync,
     refreshAccount,
     refreshActiveAccountFromService,
+    refreshAccountViaBackend,
     stopPolling,
     removeAccount,
     updateAccountById,

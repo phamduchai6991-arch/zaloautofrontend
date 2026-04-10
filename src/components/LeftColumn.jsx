@@ -534,6 +534,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     addAccount,
     refreshAccount,
     refreshActiveAccountFromService,
+    refreshAccountViaBackend,
     stopPolling,
     updateAccountById,
     setActiveAccountIndex,
@@ -713,6 +714,24 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const handleRefreshAccount = async () => {
     if (!hasAccount || syncing) return;
 
+    // Strategy 1: Backend API (uses stored cookies, no extension needed)
+    try {
+      setFeedback({ severity: 'info', message: 'Đang đồng bộ tài khoản qua server...' });
+      const backendPatch = await refreshAccountViaBackend();
+      if (backendPatch) {
+        const friendCount = backendPatch.friends?.length || 0;
+        const groupCount = backendPatch.groups?.length || 0;
+        setFeedback({
+          severity: 'success',
+          message: `Đã cập nhật tài khoản: ${friendCount} bạn bè, ${groupCount} nhóm.`,
+        });
+        return;
+      }
+    } catch (_) {
+      // Backend sync failed — fall through to extension
+    }
+
+    // Strategy 2: Extension fallback
     try {
       const extensionPatch = await refreshActiveAccountFromService();
       if (extensionPatch) {
