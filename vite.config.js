@@ -7,7 +7,7 @@ const cspPlugin = () => ({
     const csp = [
       "default-src 'self'",
       "script-src 'self' https://accounts.google.com https://apis.google.com",
-      "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com",
+      "connect-src 'self' https://*.onrender.com https://autozalo.vn https://www.autozalo.vn https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com http://127.0.0.1:3000 http://localhost:3000 http://127.0.0.1:4517 http://localhost:4517",
       "frame-src https://accounts.google.com",
       "img-src 'self' data: blob: https:",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",

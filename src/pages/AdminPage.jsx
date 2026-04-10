@@ -42,6 +42,24 @@ const PLAN_COLORS = { basic: 'info', plus: 'primary', pro: 'secondary' };
 const STATUS_COLORS = { active: 'success', expired: 'error', free: 'default', pending: 'warning', paid: 'success', cancelled: 'default' };
 const STATUS_LABELS = { active: 'Đang dùng', expired: 'Hết hạn', free: 'Miễn phí', pending: 'Chờ thanh toán', paid: 'Đã thanh toán', cancelled: 'Đã huỷ' };
 
+function getAdminErrorMessage(error) {
+  const message = String(error?.message || error || '').trim();
+
+  if (/failed to fetch|load failed|networkerror/i.test(message)) {
+    if (!API_BASE) {
+      return 'Frontend đang deploy dạng static nhưng VITE_BACKEND_URL đang để trống. Hãy trỏ VITE_BACKEND_URL tới backend Render rồi redeploy frontend.';
+    }
+
+    return 'Không gọi được backend. Hãy kiểm tra VITE_BACKEND_URL ở frontend và ZALOWEB_ALLOWED_ORIGINS ở backend.';
+  }
+
+  if (/unexpected token|not valid json/i.test(message)) {
+    return 'API trả về HTML thay vì JSON. Thường là frontend đang gọi sai domain backend hoặc /api chưa trỏ tới backend thật.';
+  }
+
+  return message || 'Đã xảy ra lỗi khi kết nối tới backend quản trị.';
+}
+
 function fmtMoney(n) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(n || 0);
 }
@@ -120,7 +138,7 @@ export default function AdminPage() {
     loadDashboard(token)
       .catch((e) => {
         if (!active) return;
-        setError(e.message);
+        setError(getAdminErrorMessage(e));
         setAuthenticated(false);
         setToken('');
         sessionStorage.removeItem(ADMIN_TOKEN_KEY);
@@ -152,7 +170,7 @@ export default function AdminPage() {
       setToken(data.token);
       await loadDashboard(data.token);
     } catch (e) {
-      setError(e.message);
+      setError(getAdminErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -164,7 +182,7 @@ export default function AdminPage() {
     try {
       await loadDashboard();
     } catch (e) {
-      setError(e.message);
+      setError(getAdminErrorMessage(e));
     } finally {
       setLoading(false);
     }
