@@ -45,6 +45,10 @@ import {
   executeMessageJobs,
 } from '../utils/extensionBridge';
 import {
+  checkLocalZaloService,
+  sendMessageJobsViaLocalService,
+} from '../utils/localZaloService';
+import {
   sendFriendRequestRequest,
 } from '../utils/zaloRequestBuilder';
 import { normalizeFriendRow } from '../utils/zaloDataTransforms';
@@ -1076,41 +1080,113 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     if (!isScheduled && messageRecords.length > 0) {
+      let shouldFallbackToExtension = false;
+
       try {
         setFeedback({
           severity: 'info',
-          message: `Đang chuyển ${messageRecords.length} tin nhắn sang extension để gửi trên tab Zalo thật...`,
+          message: `Đang kiểm tra local service để gửi ${messageRecords.length} tin nhắn...`,
         });
 
-        const response = await executeMessageJobs({
+        const localServiceAvailable = await checkLocalZaloService();
+
+        if (!localServiceAvailable) {
+          shouldFallbackToExtension = true;
+          throw new Error('Local Zalo service không khả dụng. Chuyển sang extension.');
+        }
+
+        setFeedback({
+          severity: 'info',
+          message: `Đang gửi ${messageRecords.length} tin nhắn qua local service...`,
+        });
+
+        const response = await sendMessageJobsViaLocalService({
           account: activeAccount,
           jobs: messageRecords,
         });
 
-        if (!response?.ok) {
-          throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên tab Zalo.');
-        }
+        const resolvedMessageJobs = mergeServiceResultsIntoJobs(
+          messageRecords,
+          response?.results,
+          'local-service',
+        );
 
-        const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
-        messageSummary = {
-          severity: 'info',
-          message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn và đang gửi trên tab Zalo thật. Trạng thái sẽ cập nhật tự động bên phải.`,
-        };
-      } catch (error) {
         onCampaignCommit?.({
-          messageJobs: messageRecords.map((job) => ({
-            ...job,
-            status: 'failed',
-            statusLabel: 'Không thể kết nối extension',
-            error: error.message,
-            provider: 'extension',
-          })),
+          messageJobs: resolvedMessageJobs,
         });
 
-        messageSummary = {
-          severity: 'error',
-          message: error.message,
-        };
+        const sentCount = resolvedMessageJobs.filter((job) => job.status !== 'failed').length;
+        const failedCount = resolvedMessageJobs.length - sentCount;
+
+        if (sentCount > 0 && failedCount === 0) {
+          messageSummary = {
+            severity: 'success',
+            message: `Local service đã gửi thành công ${sentCount}/${resolvedMessageJobs.length} tin nhắn.`,
+          };
+        } else if (sentCount > 0) {
+          messageSummary = {
+            severity: 'warning',
+            message: `Local service gửi thành công ${sentCount}/${resolvedMessageJobs.length} tin nhắn. ${failedCount} tin còn lại bị lỗi.`,
+          };
+        } else {
+          throw new Error(buildActionFailureMessage(resolvedMessageJobs, 'Local service không gửi được tin nhắn nào.'));
+        }
+      } catch (error) {
+        if (!shouldFallbackToExtension) {
+          onCampaignCommit?.({
+            messageJobs: messageRecords.map((job) => ({
+              ...job,
+              status: 'failed',
+              statusLabel: 'Gửi thất bại qua local service',
+              error: error.message,
+              provider: 'local-service',
+            })),
+          });
+
+          messageSummary = {
+            severity: 'error',
+            message: error.message,
+          };
+        }
+      }
+
+      if (!messageSummary && !isScheduled && messageRecords.length > 0) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Local service không sẵn sàng. Đang chuyển ${messageRecords.length} tin nhắn sang extension để gửi trên tab Zalo thật...`,
+          });
+
+          const response = await executeMessageJobs({
+            account: activeAccount,
+            jobs: messageRecords,
+          });
+
+          if (!response?.ok) {
+            throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên tab Zalo.');
+          }
+
+          const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
+          messageSummary = {
+            severity: 'info',
+            message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn và đang gửi trên tab Zalo thật. Trạng thái sẽ cập nhật tự động bên phải.`,
+          };
+        } catch (error) {
+          onCampaignCommit?.({
+            messageJobs: messageRecords.map((job) => ({
+              ...job,
+              status: 'failed',
+              statusLabel: 'Không thể gửi tin nhắn',
+              error: error.message,
+              provider: 'extension',
+            })),
+          });
+
+          messageSummary = {
+            severity: 'error',
+            message: error.message,
+          };
+        }
       }
     }
 
