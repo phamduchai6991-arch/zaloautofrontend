@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+const MAX_POLL_MS = 10 * 60 * 1000;
 
 const PLAN_NAMES = { basic: 'BASIC', plus: 'PLUS', pro: 'PRO' };
 const PERIOD_LABELS = { monthly: 'Tháng', yearly: 'Năm' };
@@ -63,6 +64,7 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
   const [bankInfo, setBankInfo] = useState(null);
   const [error, setError] = useState('');
   const pollRef = useRef(null);
+  const pollStartedAtRef = useRef(0);
 
   const amount = plan
     ? period === 'yearly' ? plan.priceYearly : plan.priceMonthly
@@ -106,7 +108,11 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
   // Poll for payment status
   const startPolling = useCallback(() => {
     if (!order?.code) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+
     setStep('checking');
+    setError('');
+    pollStartedAtRef.current = Date.now();
 
     pollRef.current = setInterval(() => {
       fetch(`${API_BASE}/api/payment/orders/${order.code}`)
@@ -114,8 +120,25 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
         .then((data) => {
           if (data.ok && data.order.status === 'paid') {
             clearInterval(pollRef.current);
+            pollRef.current = null;
             setOrder(data.order);
             setStep('success');
+            return;
+          }
+
+          if (data.ok && data.order.status === 'expired') {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setError('Đơn hàng đã hết hạn. Vui lòng tạo đơn mới để tiếp tục thanh toán.');
+            setStep('error');
+            return;
+          }
+
+          if (Date.now() - pollStartedAtRef.current > MAX_POLL_MS) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setError('Hết thời gian chờ xác nhận thanh toán. Nếu bạn đã chuyển khoản, hãy mở lại đơn hàng hoặc liên hệ hỗ trợ.');
+            setStep('error');
           }
         })
         .catch(() => {});
@@ -135,8 +158,10 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
 
   const handleClose = () => {
     if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
     setStep('creating');
     setOrder(null);
+    setError('');
     onClose(step === 'success');
   };
 

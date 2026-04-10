@@ -15,6 +15,7 @@ import {
   AccountBalance as BankIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { useNavigate } from 'react-router-dom';
 import PaymentDialog from '../components/PaymentDialog';
 
@@ -204,6 +205,7 @@ export default function PricingPage() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const { user } = useAuth();
+  const { refetch } = useSubscription();
   const navigate = useNavigate();
 
   const handleBuy = (plan) => {
@@ -218,6 +220,7 @@ export default function PricingPage() {
   const handlePaymentClose = (success) => {
     setPaymentOpen(false);
     setSelectedPlan(null);
+    if (success) refetch();
   };
 
   return (

@@ -9,6 +9,7 @@ import {
 } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import { useAccount } from '../contexts/AccountContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { onIncomingMessages, zFetch } from '../utils/extensionBridge';
 import {
   buildFriendMap,
@@ -33,6 +34,7 @@ function isExtensionInvalidationError(value) {
 
 export default function MessagesPage() {
   const { activeAccount, activeAccountReady, extensionActive, syncState } = useAccount();
+  const { isActive } = useSubscription();
   const [conversations, setConversations] = useState(() => {
     try {
       const raw = localStorage.getItem('zt_conversations');
@@ -49,6 +51,11 @@ export default function MessagesPage() {
   });
 
   const refreshConversations = useCallback(async () => {
+    if (!isActive) {
+      setFeedback({ severity: 'warning', message: 'Gói của bạn không còn hiệu lực. Vui lòng gia hạn để đọc và quản lý hội thoại.' });
+      return;
+    }
+
     if (!activeAccount) {
       console.log('[MessagesPage] refreshConversations: no activeAccount');
       setFeedback({ severity: 'warning', message: 'Chưa có tài khoản Zalo đang được chọn.' });
@@ -107,7 +114,7 @@ export default function MessagesPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeAccount, activeAccountReady, extensionActive, syncState.phase]);
+  }, [activeAccount, activeAccountReady, extensionActive, isActive, syncState.phase]);
 
   useEffect(() => {
     refreshConversations();

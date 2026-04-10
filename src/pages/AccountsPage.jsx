@@ -9,7 +9,9 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import { useAccount } from '../contexts/AccountContext';
+import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 
 export default function AccountsPage() {
   const {
@@ -19,6 +21,8 @@ export default function AccountsPage() {
     refreshActiveAccountFromService,
     removeAccount,
   } = useAccount();
+  const { subscription, planKey, maxAccounts, isActive, isExpired, daysLeft } = useSubscription();
+  const navigate = useNavigate();
   const [feedback, setFeedback] = useState(null);
 
   const handleRefresh = async () => {
@@ -33,12 +37,65 @@ export default function AccountsPage() {
     }
   };
 
+  // Subscription status banner
+  const renderSubscriptionBanner = () => {
+    if (!subscription && accounts.length === 0) return null;
+
+    if (!subscription || (!isActive && !isExpired)) {
+      return (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={<Button color="warning" size="small" onClick={() => navigate('/pricing')}>Mua gói</Button>}
+        >
+          Bạn chưa có gói đăng ký. Vui lòng mua gói để dùng tính năng tài khoản Zalo.
+        </Alert>
+      );
+    }
+
+    if (isExpired) {
+      return (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="error" size="small" onClick={() => navigate('/pricing')}>Gia hạn</Button>}
+        >
+          Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.
+        </Alert>
+      );
+    }
+
+    if (isActive && daysLeft <= 7) {
+      return (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={<Button color="warning" size="small" onClick={() => navigate('/pricing')}>Gia hạn</Button>}
+        >
+          Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> còn <strong>{daysLeft} ngày</strong> nữa hết hạn.
+        </Alert>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <Box sx={{ p: 2.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="h6" fontWeight={700}>Tài Khoản Zalo</Typography>
+        <Box>
+          <Typography variant="h6" fontWeight={700}>Tài Khoản Zalo</Typography>
+          {isActive && (
+            <Typography variant="caption" color="text.secondary">
+              Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> — {accounts.length}/{maxAccounts} tài khoản •{' '}
+              còn {daysLeft} ngày
+            </Typography>
+          )}
+        </Box>
         <Button variant="outlined" onClick={handleRefresh} disabled={activeAccountIndex < 0}>Làm mới tài khoản đang chọn</Button>
       </Box>
+
+      {renderSubscriptionBanner()}
 
       {feedback && (
         <Alert severity={feedback.severity} sx={{ mb: 2 }} onClose={() => setFeedback(null)}>

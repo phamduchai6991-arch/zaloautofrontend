@@ -40,6 +40,7 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useAccount } from '../contexts/AccountContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import {
   executeMessageJobs,
 } from '../utils/extensionBridge';
@@ -520,6 +521,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     setActiveAccountIndex,
   } = useAccount();
 
+  const { maxAccounts, isActive, isExpired, planKey } = useSubscription();
+
   const selectedItems = selection?.selectedItems || [];
   const selectedCount = selectedItems.length;
   const selectedLabel = selection?.activeLabel || 'Bạn bè';
@@ -680,6 +683,19 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       return;
     }
 
+    if (!isActive) {
+      setFeedback({ severity: 'warning', message: 'Bạn cần đăng ký gói để thêm tài khoản Zalo. Vui lòng mua gói tại trang Bảng Giá.' });
+      return;
+    }
+
+    if (accounts.length >= maxAccounts) {
+      setFeedback({
+        severity: 'warning',
+        message: `Gói ${planKey?.toUpperCase() || 'hiện tại'} chỉ cho phép tối đa ${maxAccounts} tài khoản Zalo. Hãy nâng cấp gói để thêm nhiều hơn.`,
+      });
+      return;
+    }
+
     const result = await addAccount();
     if (!result.success && result.error === 'extension_not_found') {
       setShowExtDialog(true);
@@ -787,6 +803,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   };
 
   const handleStart = async () => {
+    if (!isActive) {
+      setFeedback({
+        severity: 'warning',
+        message: isExpired
+          ? 'Gói của bạn đã hết hạn. Vui lòng gia hạn trước khi chạy các thao tác Zalo.'
+          : 'Bạn cần đăng ký gói trước khi chạy các thao tác Zalo.',
+      });
+      return;
+    }
+
     if (!hasAccount) {
       setFeedback({ severity: 'warning', message: 'Bạn cần thêm tài khoản Zalo trước khi chạy.' });
       return;
