@@ -8,7 +8,12 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   InputAdornment,
+  MenuItem,
   Paper,
   Stack,
   Tab,
@@ -101,6 +106,12 @@ export default function AdminPage() {
   const [users, setUsers] = useState(null);
   const [orders, setOrders] = useState(null);
   const [tab, setTab] = useState(0);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [grantDialogOpen, setGrantDialogOpen] = useState(false);
+  const [grantTarget, setGrantTarget] = useState(null);
+  const [grantPlan, setGrantPlan] = useState('basic');
+  const [grantPeriod, setGrantPeriod] = useState('monthly');
+  const [grantSubmitting, setGrantSubmitting] = useState(false);
 
   const adminFetch = useCallback(
     async (path, currentToken = token) => {
@@ -185,6 +196,57 @@ export default function AdminPage() {
       setError(getAdminErrorMessage(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenGrantDialog = (user) => {
+    setGrantTarget(user);
+    setGrantPlan(user?.planKey || 'basic');
+    setGrantPeriod('monthly');
+    setGrantDialogOpen(true);
+  };
+
+  const handleCloseGrantDialog = () => {
+    if (grantSubmitting) return;
+    setGrantDialogOpen(false);
+    setGrantTarget(null);
+  };
+
+  const handleGrantSubscription = async () => {
+    if (!grantTarget?.userId || !grantTarget?.email) return;
+
+    setGrantSubmitting(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/grant-subscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: grantTarget.userId,
+          userEmail: grantTarget.email,
+          planKey: grantPlan,
+          period: grantPeriod,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Không cấp được gói cho tài khoản này.');
+      }
+
+      setSuccessMessage(`Đã cấp gói ${PLAN_LABELS[grantPlan] || grantPlan} (${grantPeriod === 'yearly' ? 'năm' : 'tháng'}) cho ${grantTarget.email}.`);
+      setGrantDialogOpen(false);
+      setGrantTarget(null);
+      await loadDashboard();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    } finally {
+      setGrantSubmitting(false);
     }
   };
 
@@ -308,6 +370,7 @@ export default function AdminPage() {
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+      {successMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccessMessage('')}>{successMessage}</Alert>}
 
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
         <StatCard icon={<GroupIcon />} label="Tổng người dùng" value={s.totalUsers ?? '—'} color="primary" />
@@ -358,12 +421,13 @@ export default function AdminPage() {
                     <TableCell sx={{ fontWeight: 700 }} align="right">Số acc</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="right">Tổng chi</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="right">Đơn</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="right">Thao tác</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {users.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} align="center" sx={{ color: 'text.secondary', py: 4 }}>
+                      <TableCell colSpan={11} align="center" sx={{ color: 'text.secondary', py: 4 }}>
                         Chưa có người dùng
                       </TableCell>
                     </TableRow>
@@ -407,6 +471,11 @@ export default function AdminPage() {
                         </TableCell>
                         <TableCell align="right">
                           <Typography variant="body2">{u.orderCount}</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button size="small" variant="outlined" onClick={() => handleOpenGrantDialog(u)}>
+                            Nâng cấp gói
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -486,6 +555,47 @@ export default function AdminPage() {
           )}
         </Paper>
       )}
+
+      <Dialog open={grantDialogOpen} onClose={handleCloseGrantDialog} fullWidth maxWidth="xs">
+        <DialogTitle>Nâng cấp gói tài khoản</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info">
+              {grantTarget?.email || 'Tài khoản người dùng'}
+            </Alert>
+            <TextField
+              select
+              label="Gói"
+              value={grantPlan}
+              onChange={(e) => setGrantPlan(e.target.value)}
+              fullWidth
+            >
+              {Object.entries(PLAN_LABELS).map(([value, label]) => (
+                <MenuItem key={value} value={value}>{label}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Kỳ hạn"
+              value={grantPeriod}
+              onChange={(e) => setGrantPeriod(e.target.value)}
+              fullWidth
+            >
+              <MenuItem value="monthly">1 tháng</MenuItem>
+              <MenuItem value="yearly">1 năm</MenuItem>
+            </TextField>
+            <Typography variant="body2" color="text.secondary">
+              Nếu tài khoản đang còn hạn, hệ thống sẽ nâng gói ngay và cộng thêm thời gian vào hạn hiện tại.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseGrantDialog} disabled={grantSubmitting}>Hủy</Button>
+          <Button onClick={handleGrantSubscription} variant="contained" disabled={grantSubmitting || !grantTarget?.userId}>
+            {grantSubmitting ? 'Đang áp dụng...' : 'Áp dụng'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
