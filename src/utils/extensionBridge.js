@@ -7,14 +7,100 @@
 
 const listeners = new Set();
 let bridgeInvalidated = false;
+let bridgeInjected = false;
+let lastExtensionStatus = {
+  active: false,
+  phase: 'idle',
+  reason: 'Đang chờ kiểm tra extension.',
+  hints: [],
+  injected: false,
+  checkedAt: 0,
+};
+
+function buildMissingBridgeHints() {
+  return [
+    'Mở chrome://extensions và xác nhận AutoZalo Bridge đang bật.',
+    'Vào Chi tiết extension và đặt Site access thành On all sites hoặc cho phép riêng domain hiện tại.',
+    'Đảm bảo bạn đang mở web app bằng đúng Chrome profile đã cài extension.',
+    'Reload extension rồi tải lại trang web.',
+  ];
+}
+
+function buildBridgeErrorHints(code) {
+  if (code === 'origin_not_allowed' || code === 'check_failed') {
+    return [
+      'Vào Chi tiết extension và kiểm tra Site access cho domain hiện tại.',
+      'Nếu vừa reload extension, hãy tải lại tab web này để content script khởi tạo lại.',
+    ];
+  }
+
+  if (code === 'runtime_unavailable') {
+    return [
+      'Reload extension trong chrome://extensions.',
+      'Tải lại trang web sau khi reload extension.',
+    ];
+  }
+
+  return buildMissingBridgeHints();
+}
+
+function updateExtensionStatus(next) {
+  lastExtensionStatus = {
+    active: false,
+    phase: 'unknown',
+    reason: '',
+    hints: [],
+    injected: bridgeInjected,
+    checkedAt: Date.now(),
+    ...next,
+  };
+  return { ...lastExtensionStatus };
+}
 
 // Central listener — dispatches to registered callbacks
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   const msg = event.data;
   if (!msg || msg.source !== 'ZALOTOOL_EXT') return;
+  if (msg.type === 'ZALOTOOL_BRIDGE_BOOTSTRAP') {
+    bridgeInjected = true;
+    updateExtensionStatus({
+      active: false,
+      phase: msg.data?.phase || 'bridge_detected',
+      reason: 'Extension đã inject vào trang và đang khởi tạo kết nối.',
+      hints: ['Nếu trạng thái này giữ nguyên quá lâu, hãy reload extension rồi tải lại trang.'],
+      injected: true,
+    });
+  }
+  if (msg.type === 'ZALOTOOL_BRIDGE_ERROR') {
+    bridgeInjected = true;
+    updateExtensionStatus({
+      active: false,
+      phase: msg.data?.phase || 'bridge_error',
+      reason: msg.data?.error || 'Extension đã inject nhưng chưa kết nối được với background.',
+      hints: buildBridgeErrorHints(msg.data?.code),
+      injected: true,
+    });
+  }
+  if (msg.type === 'ZALOTOOL_READY' || msg.type === 'ZALOTOOL_CHECK_OK') {
+    bridgeInjected = true;
+    updateExtensionStatus({
+      active: true,
+      phase: 'connected',
+      reason: 'Extension đã kết nối.',
+      hints: [],
+      injected: true,
+    });
+  }
   if (msg.type === 'ZALOTOOL_EXTENSION_INVALIDATED') {
     bridgeInvalidated = true;
+    updateExtensionStatus({
+      active: false,
+      phase: 'invalidated',
+      reason: msg.data?.error || 'Extension context invalidated. Hãy reload extension rồi tải lại trang.',
+      hints: buildBridgeErrorHints('runtime_unavailable'),
+      injected: bridgeInjected,
+    });
   }
   for (const cb of listeners) {
     try { cb(msg); } catch (e) { console.error('[ExtBridge] listener error', e); }
@@ -62,35 +148,71 @@ export function requestExtension(type, data = {}, timeoutMs = 10000) {
   });
 }
 
-/** Check if extension is installed and active. */
-export function checkExtension() {
+export function getExtensionStatusSnapshot() {
+  return { ...lastExtensionStatus };
+}
+
+export function checkExtensionStatus(timeoutMs = 2500) {
   return new Promise((resolve) => {
     if (bridgeInvalidated) {
-      resolve(false);
+      resolve(updateExtensionStatus({
+        active: false,
+        phase: 'invalidated',
+        reason: 'Extension context invalidated. Hãy reload extension rồi tải lại trang.',
+        hints: buildBridgeErrorHints('runtime_unavailable'),
+      }));
       return;
     }
 
-    const timeout = setTimeout(() => { cleanup(); resolve(false); }, 2000);
-    const cleanup = onExtensionMessage((msg) => {
-      if (msg.type === 'ZALOTOOL_READY' || msg.type === 'ZALOTOOL_CHECK_OK') {
-        clearTimeout(timeout);
-        cleanup();
-        resolve(true);
+    const timeout = setTimeout(() => {
+      cleanup();
+      if (bridgeInjected) {
+        resolve(updateExtensionStatus({
+          active: false,
+          phase: 'bridge_timeout',
+          reason: 'Extension đã inject vào trang nhưng chưa hoàn tất bắt tay với background.',
+          hints: [
+            'Reload extension trong chrome://extensions.',
+            'Tải lại tab web sau khi reload extension.',
+          ],
+          injected: true,
+        }));
         return;
       }
 
-      if (msg.type === 'ZALOTOOL_EXTENSION_INVALIDATED') {
+      resolve(updateExtensionStatus({
+        active: false,
+        phase: 'bridge_missing',
+        reason: 'Trang hiện tại chưa nhận được content script của extension.',
+        hints: buildMissingBridgeHints(),
+        injected: false,
+      }));
+    }, timeoutMs);
+
+    const cleanup = onExtensionMessage((msg) => {
+      if (msg.type === 'ZALOTOOL_READY' || msg.type === 'ZALOTOOL_CHECK_OK' || msg.type === 'ZALOTOOL_EXTENSION_INVALIDATED' || msg.type === 'ZALOTOOL_BRIDGE_ERROR') {
         clearTimeout(timeout);
         cleanup();
-        resolve(false);
+        resolve(getExtensionStatusSnapshot());
       }
     });
+
     if (!postToExtension('ZALOTOOL_CHECK')) {
       clearTimeout(timeout);
       cleanup();
-      resolve(false);
+      resolve(updateExtensionStatus({
+        active: false,
+        phase: 'invalidated',
+        reason: 'Extension context invalidated. Hãy reload extension rồi tải lại trang.',
+        hints: buildBridgeErrorHints('runtime_unavailable'),
+      }));
     }
   });
+}
+
+/** Check if extension is installed and active. */
+export function checkExtension() {
+  return checkExtensionStatus().then((status) => Boolean(status?.active));
 }
 
 /** Ask extension to open incognito window for Zalo login. */

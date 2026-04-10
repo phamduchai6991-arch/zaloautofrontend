@@ -2,8 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import {
   cancelAccountSync,
   checkExtension,
+  checkExtensionStatus,
   closeIncognito,
   confirmAccountSync,
+  getExtensionStatusSnapshot,
   onExtensionMessage,
   openZaloLogin,
 } from '../utils/extensionBridge';
@@ -20,6 +22,14 @@ const INITIAL_SYNC_STATE = {
   startedAt: null,
   timestamp: 0,
   requiresConfirmation: false,
+};
+const INITIAL_EXTENSION_STATUS = {
+  active: false,
+  phase: 'idle',
+  reason: 'Đang chờ kiểm tra extension.',
+  hints: [],
+  injected: false,
+  checkedAt: 0,
 };
 
 function hasStoredSession(account) {
@@ -101,6 +111,10 @@ export function AccountProvider({ children }) {
   const extensionInvalidatedRef = useRef(false);
   const [extensionActive, setExtensionActive] = useState(false);
   const [extensionChecked, setExtensionChecked] = useState(false);
+  const [extensionStatus, setExtensionStatus] = useState(() => ({
+    ...INITIAL_EXTENSION_STATUS,
+    ...getExtensionStatusSnapshot(),
+  }));
   const [accounts, setAccounts] = useState(loadAccounts);
   const [activeAccountIndex, setActiveAccountIndex] = useState(loadActiveIndex);
   const [syncState, setSyncState] = useState(INITIAL_SYNC_STATE);
@@ -164,14 +178,21 @@ export function AccountProvider({ children }) {
         if (!cancelled) {
           setExtensionActive(false);
           setExtensionChecked(true);
+          setExtensionStatus((prev) => ({
+            ...prev,
+            active: false,
+            phase: 'invalidated',
+            checkedAt: Date.now(),
+          }));
         }
         return;
       }
 
-      const active = await checkExtension();
+      const status = await checkExtensionStatus();
       if (!cancelled) {
-        setExtensionActive(active);
+        setExtensionActive(Boolean(status?.active));
         setExtensionChecked(true);
+        setExtensionStatus(status || INITIAL_EXTENSION_STATUS);
       }
     };
     check();
@@ -180,8 +201,11 @@ export function AccountProvider({ children }) {
         return;
       }
 
-      const active = await checkExtension();
-      if (!cancelled) setExtensionActive(active);
+      const status = await checkExtensionStatus();
+      if (!cancelled) {
+        setExtensionActive(Boolean(status?.active));
+        setExtensionStatus(status || INITIAL_EXTENSION_STATUS);
+      }
     }, 10000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
@@ -189,6 +213,10 @@ export function AccountProvider({ children }) {
   // Listen for messages from the extension
   useEffect(() => {
     const unsub = onExtensionMessage(async (msg) => {
+      if (msg.type === 'ZALOTOOL_READY' || msg.type === 'ZALOTOOL_CHECK_OK' || msg.type === 'ZALOTOOL_EXTENSION_INVALIDATED' || msg.type === 'ZALOTOOL_BRIDGE_BOOTSTRAP' || msg.type === 'ZALOTOOL_BRIDGE_ERROR') {
+        setExtensionStatus(getExtensionStatusSnapshot());
+      }
+
       // Extension ready signal (fires on page load if extension installed)
       if (msg.type === 'ZALOTOOL_READY') {
         extensionInvalidatedRef.current = false;
@@ -472,6 +500,7 @@ export function AccountProvider({ children }) {
   const value = {
     extensionActive,
     extensionChecked,
+    extensionStatus,
     accounts,
     activeAccountIndex,
     activeAccount,

@@ -50,6 +50,7 @@ const SECTIONS = [
             'Nhấn "Tải tiện ích đã giải nén"',
             'Chọn thư mục extension trong dự án',
             'Bật "Cho phép trong cửa sổ ẩn danh"',
+            'Mở Chi tiết extension và đặt Site access thành On all sites hoặc cho phép riêng zaloautofrontend.onrender.com',
             'Tải lại trang web AutoZalo',
           ].map((step, i) => (
             <ListItem key={i} sx={{ py: 0.25 }}>
@@ -62,6 +63,9 @@ const SECTIONS = [
         </List>
         <Alert severity="warning" sx={{ mt: 2 }}>
           Sau khi reload extension, hãy <b>refresh lại trang web</b> (F5) để extension kết nối lại.
+        </Alert>
+        <Alert severity="info" sx={{ mt: 2 }}>
+          Nếu đã bật ẩn danh nhưng trang vẫn báo chưa kết nối, hãy kiểm tra lại quyền <b>Site access</b> của extension trên domain web app.
         </Alert>
       </>
     ),

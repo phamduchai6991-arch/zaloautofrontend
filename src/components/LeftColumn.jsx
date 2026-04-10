@@ -494,6 +494,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     activeAccountIndex,
     extensionActive,
     extensionChecked,
+    extensionStatus,
     accounts,
     cancelPendingSync,
     confirmPendingSync,
@@ -535,6 +536,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const canNotificationFromCurrentTab = selection?.activeTab >= 0 && selection?.activeTab <= 3;
   const activeAccountPrimary = getAccountPrimaryLabel(activeAccount, activeAccountIndex);
   const activeAccountSecondary = getAccountSecondaryLabel(activeAccount);
+  const extensionStatusReason = extensionActive
+    ? 'Đã kết nối, web đang chạy ở chế độ extension-only'
+    : extensionStatus?.reason || 'Chưa kết nối, hãy kiểm tra extension.';
+  const extensionStatusHints = Array.isArray(extensionStatus?.hints) ? extensionStatus.hints : [];
   const syncStatusLabel = activeAccountReady
     ? 'Sẵn sàng'
     : syncState.phase === 'awaiting_sync_confirmation'
@@ -1214,7 +1219,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             Bạn bè: {activeAccount?.friends?.length || 0} | Nhóm: {activeAccount?.groups?.length || 0}
           </Typography>
           <Typography variant="body2" color={extensionActive ? 'success.main' : 'error.main'}>
-            Extension: {extensionActive ? 'Đã kết nối, web đang chạy ở chế độ extension-only' : 'Chưa kết nối, cần cài hoặc reload extension'}
+            Extension: {extensionStatusReason}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Đang chọn: {selectedCount}/{selection?.allItems?.length || 0} mục từ tab {selectedLabel}
@@ -1239,6 +1244,11 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           <Alert severity="warning" sx={{ mb: 2 }}>
             Bạn cần cài đặt extension "AutoZalo Bridge" để sử dụng tính năng này.
           </Alert>
+          {!extensionActive && extensionStatus?.reason ? (
+            <Alert severity={extensionStatus?.injected ? 'info' : 'warning'} sx={{ mb: 2 }}>
+              {extensionStatus.reason}
+            </Alert>
+          ) : null}
           <Typography variant="body2" sx={{ mb: 1 }}>
             Extension giúp mở cửa sổ ẩn danh, lấy cookie đúng phiên đăng nhập và đồng bộ dữ liệu Zalo về web app.
           </Typography>
@@ -1251,8 +1261,22 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             3. Nhấn <b>"Tải tiện ích đã giải nén"</b><br />
             4. Chọn thư mục <b>extension</b><br />
             5. Bật <b>"Cho phép trong cửa sổ ẩn danh"</b><br />
-            6. Tải lại trang web này
+            6. Mở <b>Chi tiết</b> của extension, đặt <b>Site access</b> thành <b>On all sites</b> hoặc cho phép riêng <b>zaloautofrontend.onrender.com</b><br />
+            7. Tải lại trang web này
           </Typography>
+          {!extensionActive && extensionStatusHints.length > 0 ? (
+            <Typography variant="body2" component="div" sx={{ mt: 2 }}>
+              {extensionStatusHints.map((hint, index) => (
+                <React.Fragment key={hint}>
+                  {index + 1}. {hint}
+                  {index < extensionStatusHints.length - 1 ? <br /> : null}
+                </React.Fragment>
+              ))}
+            </Typography>
+          ) : null}
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Nếu đã cài extension nhưng web vẫn báo chưa kết nối, nguyên nhân thường là extension chưa được phép chạy trên domain hiện tại dù đã bật ẩn danh.
+          </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowExtDialog(false)}>Đóng</Button>
