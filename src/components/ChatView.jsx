@@ -13,7 +13,8 @@ import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import GroupIcon from '@mui/icons-material/Group';
 import { zFetch, onIncomingMessages } from '../utils/extensionBridge';
-import { sendTextMessageRequest } from '../utils/zaloRequestBuilder';
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 
 function formatMessageTime(ts) {
   if (!ts) return '';
@@ -280,17 +281,74 @@ export default function ChatView({ conversation, account, accountReady = false, 
     setInputValue('');
 
     try {
-      if (!extensionActive) {
-        throw new Error('Không có kênh gửi tin nhắn khả dụng. Hãy làm mới tài khoản hoặc bật extension.');
+      let sent = false;
+
+      // Strategy 1: Backend API (zalo-api-final)
+      if (API_BASE && account) {
+        try {
+          const res = await fetch(`${API_BASE}/api/zalo/messages/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              account,
+              jobs: [{
+                id: tempMsg.msgId,
+                zid: conversation.id || conversation.rawId,
+                isGroup: conversation.isGroup,
+                content: text,
+                sourceTab: conversation.isGroup ? 'group' : 'friend',
+              }],
+            }),
+          });
+          if (res.ok) {
+            // Read NDJSON stream to check result
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            let lastResult = null;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop() || '';
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                try { lastResult = JSON.parse(line); } catch {}
+              }
+            }
+            if (lastResult?.ok) sent = true;
+            else if (lastResult?.error) throw new Error(lastResult.error);
+          }
+        } catch (backendErr) {
+          if (sent) throw backendErr;
+          // Fall through to extension
+          console.warn('[ChatView] Backend send failed, trying extension:', backendErr.message);
+        }
       }
 
-      await sendTextMessageRequest(account, {
-        id: tempMsg.msgId,
-        zid: conversation.id || conversation.rawId,
-        isGroup: conversation.isGroup,
-        content: text,
-        sourceTab: conversation.isGroup ? 'group' : 'friend',
-      });
+      // Strategy 2: Extension fallback
+      if (!sent && extensionActive) {
+        const response = await zFetch({
+          account,
+          request: {
+            method: 'sendZText',
+            args: {
+              toId: conversation.id || conversation.rawId,
+              message: text,
+              isGroup: Boolean(conversation.isGroup),
+              clientId: tempMsg.msgId,
+            },
+            meta: { job: { id: tempMsg.msgId, zid: conversation.id || conversation.rawId, content: text } },
+          },
+        });
+        if (response?.ok) sent = true;
+        else throw new Error(response?.error || 'Extension gửi tin nhắn thất bại.');
+      }
+
+      if (!sent) {
+        throw new Error('Không có kênh gửi tin nhắn khả dụng. Hãy kiểm tra kết nối server hoặc extension.');
+      }
 
       setMessages((prev) =>
         prev.map((m) =>
