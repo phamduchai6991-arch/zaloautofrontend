@@ -20,6 +20,7 @@ export default function AccountsPage() {
     setActiveAccountIndex,
     refreshActiveAccountFromService,
     refreshAccount,
+    refreshAccountViaBackend,
     removeAccount,
   } = useAccount();
   const { subscription, planKey, maxAccounts, isActive, isExpired, daysLeft } = useSubscription();
@@ -28,17 +29,26 @@ export default function AccountsPage() {
 
   const handleRefresh = async () => {
     try {
-      const result = await refreshActiveAccountFromService();
-      setFeedback({
-        severity: result ? 'success' : 'warning',
-        message: result ? 'Đã đồng bộ lại phiên tài khoản qua extension.' : 'Không lấy được snapshot phiên mới từ extension. Web sẽ mở lại luồng đăng nhập để làm mới toàn bộ.',
-      });
-      if (!result) {
-        await refreshAccount();
+      setFeedback({ severity: 'info', message: 'Đang đồng bộ tài khoản qua server...' });
+      const backendPatch = await refreshAccountViaBackend();
+      if (backendPatch) {
+        const friendCount = backendPatch.friends?.length || 0;
+        const groupCount = backendPatch.groups?.length || 0;
+        setFeedback({
+          severity: 'success',
+          message: `Đã cập nhật tài khoản: ${friendCount} bạn bè, ${groupCount} nhóm.`,
+        });
+        return;
       }
+      setFeedback({
+        severity: 'warning',
+        message: 'Không thể đồng bộ — tài khoản chưa có session. Hãy xóa và thêm lại.',
+      });
     } catch (error) {
-      setFeedback({ severity: 'info', message: 'Đang mở lại luồng đăng nhập qua extension để làm mới tài khoản.' });
-      await refreshAccount();
+      setFeedback({
+        severity: 'error',
+        message: `Đồng bộ thất bại: ${error?.message || 'Lỗi không xác định'}`,
+      });
     }
   };
 

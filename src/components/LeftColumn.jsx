@@ -714,7 +714,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const handleRefreshAccount = async () => {
     if (!hasAccount || syncing) return;
 
-    // Strategy 1: Backend API (uses stored cookies, no extension needed)
     try {
       setFeedback({ severity: 'info', message: 'Đang đồng bộ tài khoản qua server...' });
       const backendPatch = await refreshAccountViaBackend();
@@ -727,25 +726,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         });
         return;
       }
-    } catch (_) {
-      // Backend sync failed — fall through to extension
+      setFeedback({
+        severity: 'warning',
+        message: 'Không thể đồng bộ — tài khoản chưa có session (cookie/IMEI). Hãy xóa và thêm lại tài khoản.',
+      });
+    } catch (error) {
+      setFeedback({
+        severity: 'error',
+        message: `Đồng bộ thất bại: ${error?.message || 'Lỗi không xác định'}`,
+      });
     }
-
-    // Strategy 2: Extension fallback
-    try {
-      const extensionPatch = await refreshActiveAccountFromService();
-      if (extensionPatch) {
-        setFeedback({ severity: 'success', message: 'Đã làm mới phiên tài khoản qua extension.' });
-        return;
-      }
-    } catch (_) {
-      // Session refresh failed — do NOT open a login window on top.
-    }
-
-    setFeedback({
-      severity: 'warning',
-      message: 'Không thể làm mới phiên Zalo. Nếu phiên hết hạn, hãy xóa tài khoản và thêm lại.',
-    });
   };
 
   const handleConfirmPendingSync = async () => {
