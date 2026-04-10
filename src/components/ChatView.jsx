@@ -201,15 +201,15 @@ export default function ChatView({ conversation, account, accountReady = false, 
     }
   }, [conversation, extensionActive, account, accountReady]);
 
-  // Initial load when conversation changes
+  // Initial load when conversation changes — restore cache only (no auto-fetch via extension)
   useEffect(() => {
     const id = conversation?.id || conversation?.rawId || null;
     conversationIdRef.current = id;
-    // Restore cached messages instantly, then fetch fresh ones
     const cached = getCachedMessages(id);
     setMessages(cached);
     setInputValue('');
-    if (id) fetchMessages(false);
+    // Only fetch from extension if it's already active (tab already exists), don't force new window
+    if (id && extensionActive && accountReady) fetchMessages(false);
   }, [fetchMessages, conversation]);
 
   // Listen for real-time incoming messages via WebSocket interceptor

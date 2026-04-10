@@ -116,9 +116,9 @@ export default function MessagesPage() {
     }
   }, [activeAccount, activeAccountReady, extensionActive, isActive, syncState.phase]);
 
-  useEffect(() => {
-    refreshConversations();
-  }, [refreshConversations]);
+  // Don't auto-refresh on mount — uses cached conversations.
+  // User clicks "Đồng bộ ngay" to fetch fresh data (requires extension → opens Chrome).
+  // useEffect(() => { refreshConversations(); }, [refreshConversations]);
 
   useEffect(() => {
     if (!extensionActive) return;
