@@ -145,6 +145,37 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
     }, 5000);
   }, [order]);
 
+  // Auto-start polling when transfer step is reached (QR flow — user may pay without clicking button)
+  useEffect(() => {
+    if (step === 'transfer' && order?.code && !pollRef.current) {
+      pollStartedAtRef.current = Date.now();
+      pollRef.current = setInterval(() => {
+        fetch(`${API_BASE}/api/payment/orders/${order.code}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.ok && data.order.status === 'paid') {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setOrder(data.order);
+              setStep('success');
+            } else if (data.ok && data.order.status === 'expired') {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setError('Đơn hàng đã hết hạn. Vui lòng tạo đơn mới.');
+              setStep('error');
+            }
+          })
+          .catch(() => {});
+      }, 5000);
+    }
+    return () => {
+      if (step !== 'transfer' && step !== 'checking' && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [step, order]);
+
   // Cleanup polling on unmount/close
   useEffect(() => {
     return () => {
@@ -205,6 +236,26 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
                 </Typography>
               </Stack>
             </Box>
+
+            {/* SePay Dynamic QR Code */}
+            <Box sx={{ textAlign: 'center', mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Quét mã QR để chuyển khoản
+              </Typography>
+              <Box
+                component="img"
+                src={`https://qr.sepay.vn/img?acc=${encodeURIComponent(bankInfo.accountNumber)}&bank=${encodeURIComponent(bankInfo.bankName)}&amount=${order.amount}&des=${encodeURIComponent(order.code)}`}
+                alt="QR thanh toán"
+                sx={{ width: 220, height: 220, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
+              />
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                Mở app ngân hàng, quét QR — thông tin sẽ được điền sẵn
+              </Typography>
+            </Box>
+
+            <Divider sx={{ my: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">hoặc chuyển khoản thủ công</Typography>
+            </Divider>
 
             <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
               Chuyển khoản theo thông tin sau:
