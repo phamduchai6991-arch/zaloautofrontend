@@ -15,12 +15,8 @@ import {
   Person as PersonIcon,
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
-  AdminPanelSettings as AdminIcon,
 } from '@mui/icons-material';
 import { useLocation, Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || '';
 
 const DRAWER_WIDTH = 280;
 
@@ -38,8 +34,6 @@ const bottomMenu = [
 export default function Sidebar({ open, onToggle }) {
   const drawerWidth = open ? DRAWER_WIDTH : 80;
   const location = useLocation();
-  const { user } = useAuth();
-  const isAdmin = ADMIN_EMAIL ? user?.email === ADMIN_EMAIL : false;
 
   const renderItem = (item, idx) => {
     const isActive = item.path ? location.pathname.startsWith(item.path) : false;
@@ -134,7 +128,6 @@ export default function Sidebar({ open, onToggle }) {
       {/* Bottom menu */}
       <List sx={{ py: 1 }}>
         {bottomMenu.map(renderItem)}
-        {isAdmin && renderItem({ icon: <AdminIcon />, label: 'Quản Trị Admin', path: '/admin' }, 'admin')}
       </List>
 
       {/* Build version */}
