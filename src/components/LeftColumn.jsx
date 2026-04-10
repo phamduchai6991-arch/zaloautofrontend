@@ -12,6 +12,7 @@ import {
   DialogTitle,
   IconButton,
   InputAdornment,
+  Menu,
   MenuItem,
   Paper,
   Checkbox,
@@ -31,6 +32,7 @@ import {
   AutoAwesome as AiIcon,
   CalendarMonth as CalendarIcon,
   Close as CloseIcon,
+  Delete as DeleteIcon,
   FlashOn as FlashIcon,
   Image as ImageIcon,
   ListAlt as ListIcon,
@@ -76,6 +78,23 @@ function buildRewriteOptions(text) {
     `Chào bạn, ${compact.charAt(0).toLowerCase()}${compact.slice(1)}`,
     `${compact}. Nếu phù hợp, mình rất mong được phản hồi từ bạn.`,
   ];
+}
+
+async function fetchAiRewrite(text, target) {
+  const base = import.meta.env.VITE_BACKEND_URL || '';
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/api/ai/rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, target }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data?.options) ? data.options.filter((o) => typeof o === 'string' && o.trim()) : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function isGenericAccountName(value) {
@@ -512,6 +531,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [scheduleAt, setScheduleAt] = useState('');
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
+  const [settingsMenuAnchor, setSettingsMenuAnchor] = useState(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [pullGroupFriendIds, setPullGroupFriendIds] = useState([]);
@@ -539,6 +560,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     updateAccountById,
     setActiveAccountIndex,
     serverAccountCount,
+    removeAccount,
   } = useAccount();
 
   const { maxAccounts, isActive, isExpired, planKey } = useSubscription();
@@ -753,14 +775,22 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
   };
 
-  const openRewriteDialog = (target) => {
+  const openRewriteDialog = async (target) => {
     const sourceText = target === 'friend' ? friendRequest : message;
-    const options = buildRewriteOptions(sourceText);
-    if (!options.length) {
+    if (!sourceText.trim()) {
       setFeedback({ severity: 'warning', message: 'Cần nhập nội dung trước khi viết lại.' });
       return;
     }
-    setRewriteDialog({ open: true, target, options });
+    // Show dialog immediately with loading state
+    setRewriteDialog({ open: true, target, options: [], loading: true });
+    const aiOptions = await fetchAiRewrite(sourceText, target);
+    if (aiOptions && aiOptions.length > 0) {
+      setRewriteDialog({ open: true, target, options: aiOptions, loading: false });
+    } else {
+      // Fallback to static options if AI unavailable
+      const fallback = buildRewriteOptions(sourceText);
+      setRewriteDialog({ open: true, target, options: fallback, loading: false });
+    }
   };
 
   const applyRewriteOption = (value) => {
@@ -882,10 +912,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       : { targets: [], totals: null, summaries: [] };
     const inviteTargets = inviteResolution.targets || [];
 
-    if (!isScheduled && nhanTinEnabled && selectedFiles.length > 0) {
-      setFeedback({ severity: 'warning', message: 'Tự động nhắn tin hiện mới hỗ trợ nội dung chữ. File đính kèm chưa được thực thi thật.' });
-      return;
-    }
+
 
     if (ketBanEnabled && inviteTargets.length === 0) {
       const summary = inviteResolution?.totals;
@@ -1219,12 +1246,26 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             message: `Đang gửi ${messageRecords.length} tin nhắn qua server...`,
           });
 
+          // Convert selected files to base64 for server upload
+          let filesPayload = [];
+          if (selectedFiles.length > 0) {
+            filesPayload = await Promise.all(
+              selectedFiles.map((file) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({ name: file.name, data: reader.result.split(',')[1] });
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              }))
+            );
+          }
+
           const res = await fetch(`${API_BASE}/api/zalo/messages/batch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               account: activeAccount,
               jobs: messageRecords,
+              ...(filesPayload.length > 0 ? { files: filesPayload } : {}),
             }),
           });
 
@@ -1321,9 +1362,14 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           <IconButton size="small" onClick={handleRefreshAccount} disabled={syncing || accounts.length === 0} title="Làm mới dữ liệu">
             <RefreshIcon fontSize="small" />
           </IconButton>
-          <IconButton size="small">
+          <IconButton size="small" onClick={(e) => setSettingsMenuAnchor(e.currentTarget)} disabled={accounts.length === 0}>
             <SettingsIcon fontSize="small" />
           </IconButton>
+          <Menu anchorEl={settingsMenuAnchor} open={Boolean(settingsMenuAnchor)} onClose={() => setSettingsMenuAnchor(null)}>
+            <MenuItem onClick={() => { setSettingsMenuAnchor(null); setDeleteConfirmOpen(true); }} disabled={activeAccountIndex < 0}>
+              <DeleteIcon fontSize="small" sx={{ mr: 1 }} /> Xóa tài khoản đang chọn
+            </MenuItem>
+          </Menu>
         </Box>
 
         {accounts.length > 0 && (
@@ -1544,20 +1590,27 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       </Dialog>
 
       <Dialog open={rewriteDialog.open} onClose={() => setRewriteDialog({ open: false, target: 'message', options: [] })} maxWidth="sm" fullWidth>
-        <DialogTitle>Gợi ý viết lại</DialogTitle>
+        <DialogTitle>✨ AI Gợi ý viết lại</DialogTitle>
         <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-            {rewriteDialog.options.map((option) => (
-              <Button
-                key={option}
-                variant="outlined"
-                onClick={() => applyRewriteOption(option)}
-                sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
-              >
-                {option}
-              </Button>
-            ))}
-          </Box>
+          {rewriteDialog.loading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, py: 4 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary">Đang tạo gợi ý bằng AI...</Typography>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+              {rewriteDialog.options.map((option, idx) => (
+                <Button
+                  key={idx}
+                  variant="outlined"
+                  onClick={() => applyRewriteOption(option)}
+                  sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                >
+                  {option}
+                </Button>
+              ))}
+            </Box>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1577,6 +1630,25 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         <DialogActions>
           <Button onClick={() => setScheduleDialogOpen(false)}>Đóng</Button>
           <Button onClick={() => setScheduleDialogOpen(false)} variant="contained">Xác nhận</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} maxWidth="xs">
+        <DialogTitle>Xóa tài khoản Zalo</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Bạn có chắc muốn xóa tài khoản <b>{accounts[activeAccountIndex]?.name || ''}</b> khỏi hệ thống?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>Hủy</Button>
+          <Button color="error" variant="contained" onClick={() => {
+            removeAccount(activeAccountIndex);
+            setDeleteConfirmOpen(false);
+            setFeedback({ severity: 'success', message: 'Đã xóa tài khoản.' });
+          }}>
+            Xóa
+          </Button>
         </DialogActions>
       </Dialog>
 
