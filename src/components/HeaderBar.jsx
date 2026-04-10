@@ -21,11 +21,21 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 
 export default function HeaderBar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { planKey, isActive } = useSubscription();
   const [anchorEl, setAnchorEl] = useState(null);
+
+  const planLabel = user
+    ? (isActive ? (PLAN_LABELS[planKey] || String(planKey || '').toUpperCase()) : 'FREE')
+    : 'LOGIN';
+
+  const planColor = user
+    ? (isActive ? '#f59e0b' : '#637381')
+    : '#637381';
 
   const handleAvatarClick = (e) => {
     if (user) {
@@ -141,7 +151,7 @@ export default function HeaderBar() {
             {user ? user.name?.charAt(0) : 'P'}
           </Avatar>
           <Chip
-            label={user ? 'BASIC' : 'LOGIN'}
+            label={planLabel}
             size="small"
             sx={{
               position: 'absolute',
@@ -151,7 +161,7 @@ export default function HeaderBar() {
               fontSize: '0.55rem',
               height: 14,
               fontWeight: 700,
-              bgcolor: user ? '#f59e0b' : '#637381',
+              bgcolor: planColor,
               color: '#fff',
               '& .MuiChip-label': { px: 0.5 },
             }}

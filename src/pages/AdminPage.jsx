@@ -38,6 +38,7 @@ import {
   Visibility,
   VisibilityOff,
 } from '@mui/icons-material';
+import { notifySubscriptionChanged } from '../contexts/SubscriptionContext';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const ADMIN_TOKEN_KEY = 'autozalo_admin_token';
@@ -240,6 +241,7 @@ export default function AdminPage() {
       }
 
       setSuccessMessage(`Đã cấp gói ${PLAN_LABELS[grantPlan] || grantPlan} (${grantPeriod === 'yearly' ? 'năm' : 'tháng'}) cho ${grantTarget.email}.`);
+      notifySubscriptionChanged(grantTarget.userId);
       setGrantDialogOpen(false);
       setGrantTarget(null);
       await loadDashboard();

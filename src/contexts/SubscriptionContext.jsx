@@ -16,6 +16,7 @@ export const PLAN_LABELS = {
 };
 
 const SubscriptionContext = createContext(null);
+const SUBSCRIPTION_CHANGED_EVENT = 'autozalo:subscription-changed';
 
 export function SubscriptionProvider({ children }) {
   const { user } = useAuth();
@@ -47,6 +48,42 @@ export function SubscriptionProvider({ children }) {
     fetchSubscription();
   }, [fetchSubscription]);
 
+  useEffect(() => {
+    if (!user?.sub) return undefined;
+
+    const handleFocus = () => {
+      fetchSubscription();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSubscription();
+      }
+    };
+
+    const handleSubscriptionChanged = (event) => {
+      const targetUserId = event?.detail?.userId;
+      if (!targetUserId || targetUserId === user.sub) {
+        fetchSubscription();
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      fetchSubscription();
+    }, 60000);
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener(SUBSCRIPTION_CHANGED_EVENT, handleSubscriptionChanged);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener(SUBSCRIPTION_CHANGED_EVENT, handleSubscriptionChanged);
+    };
+  }, [fetchSubscription, user?.sub]);
+
   const planKey = subscription?.status === 'active' ? subscription.planKey : null;
   const maxAccounts = planKey ? (PLAN_LIMITS[planKey] ?? 0) : 0;
   const isActive = subscription?.status === 'active';
@@ -71,4 +108,10 @@ export function useSubscription() {
   const ctx = useContext(SubscriptionContext);
   if (!ctx) throw new Error('useSubscription must be inside SubscriptionProvider');
   return ctx;
+}
+
+export function notifySubscriptionChanged(userId) {
+  window.dispatchEvent(new CustomEvent(SUBSCRIPTION_CHANGED_EVENT, {
+    detail: { userId: userId || '' },
+  }));
 }
