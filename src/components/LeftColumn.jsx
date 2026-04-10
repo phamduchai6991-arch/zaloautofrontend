@@ -48,6 +48,8 @@ import {
   sendFriendRequestRequest,
 } from '../utils/zaloRequestBuilder';
 import { normalizeFriendRow } from '../utils/zaloDataTransforms';
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 import {
   buildActionRecords,
   buildInviteRecords,
@@ -992,20 +994,73 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
     if (!isScheduled && inviteRecords.length > 0) {
       let resolvedInviteJobs = [];
+      let backendInviteOk = false;
 
-      try {
-        setFeedback({
-          severity: 'info',
-          message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua extension...`,
-        });
+      // --- Strategy 1: Backend API (zalo-api-final) ---
+      if (API_BASE) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua server...`,
+          });
 
-        const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
-        resolvedInviteJobs = mergeInviteResultsIntoJobs(
-          inviteRecords,
-          response?.results,
-          'extension',
-        );
+          const res = await fetch(`${API_BASE}/api/zalo/friends/requests/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              account: activeAccount,
+              jobs: inviteRecords,
+            }),
+          });
 
+          const result = await res.json();
+
+          if (result?.ok && Array.isArray(result.results)) {
+            backendInviteOk = true;
+            resolvedInviteJobs = mergeInviteResultsIntoJobs(
+              inviteRecords,
+              result.results,
+              'server',
+            );
+          }
+        } catch (_) {
+          // Backend unreachable — fall through to extension
+        }
+      }
+
+      // --- Strategy 2: Extension fallback ---
+      if (!backendInviteOk) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua extension...`,
+          });
+
+          const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
+          resolvedInviteJobs = mergeInviteResultsIntoJobs(
+            inviteRecords,
+            response?.results,
+            'extension',
+          );
+        } catch (error) {
+          onCampaignCommit?.({
+            inviteJobs: inviteRecords.map((job) => ({
+              ...job,
+              status: 'failed',
+              statusLabel: 'Không thể gửi lời mời',
+              error: error.message,
+              provider: 'extension',
+            })),
+          });
+
+          inviteSummary = {
+            severity: 'error',
+            message: error.message,
+          };
+        }
+      }
+
+      if (resolvedInviteJobs.length > 0) {
         hideProcessedContactRows(activeAccount, resolvedInviteJobs, deletePhoneAfterActionEnabled);
 
         onCampaignCommit?.({
@@ -1018,31 +1073,19 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         if (processedCount > 0 && failedCount === 0) {
           inviteSummary = {
             severity: 'success',
-            message: `Extension đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn thành công.`,
+            message: `Đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn thành công.`,
           };
         } else if (processedCount > 0) {
           inviteSummary = {
             severity: 'warning',
-            message: `Extension xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
+            message: `Xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} bị lỗi.`,
           };
-        } else {
-          throw new Error('Extension không xử lý được lời mời kết bạn nào.');
+        } else if (!inviteSummary) {
+          inviteSummary = {
+            severity: 'error',
+            message: 'Không xử lý được lời mời kết bạn nào.',
+          };
         }
-      } catch (error) {
-        onCampaignCommit?.({
-          inviteJobs: inviteRecords.map((job) => ({
-            ...job,
-            status: 'failed',
-            statusLabel: 'Không thể kết nối extension',
-            error: error.message,
-            provider: 'extension',
-          })),
-        });
-
-        inviteSummary = {
-          severity: 'error',
-          message: error.message,
-        };
       }
 
       const optimisticSentRequests = resolvedInviteJobs
@@ -1079,41 +1122,90 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     if (!isScheduled && messageRecords.length > 0) {
-      try {
-        setFeedback({
-          severity: 'info',
-          message: `Đang gửi ${messageRecords.length} tin nhắn qua extension bằng phiên Zalo đã lưu...`,
-        });
+      let backendOk = false;
 
-        const response = await executeMessageJobs({
-          account: activeAccount,
-          jobs: messageRecords,
-        });
+      // --- Strategy 1: Backend API (zalo-api-final, direct HTTP, most reliable) ---
+      if (API_BASE) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang gửi ${messageRecords.length} tin nhắn qua server...`,
+          });
 
-        if (!response?.ok) {
-          throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên phiên Zalo đã lưu.');
+          const res = await fetch(`${API_BASE}/api/zalo/messages/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              account: activeAccount,
+              jobs: messageRecords,
+            }),
+          });
+
+          const result = await res.json();
+
+          if (result?.ok) {
+            backendOk = true;
+            const sent = Number(result.accepted || 0);
+            const failed = Number(result.failed || 0);
+
+            if (Array.isArray(result.results)) {
+              onCampaignCommit?.({
+                messageJobs: result.results.map((r) => ({
+                  ...messageRecords.find((j) => j.id === r.jobId) || {},
+                  ...r,
+                  provider: 'server',
+                })),
+              });
+            }
+
+            messageSummary = {
+              severity: failed > 0 ? 'warning' : 'success',
+              message: `Server đã gửi ${sent}/${messageRecords.length} tin nhắn.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
+            };
+          }
+        } catch (_) {
+          // Backend unreachable — fall through to extension
         }
+      }
 
-        const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
-        messageSummary = {
-          severity: 'info',
-          message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn và sẽ dùng lại phiên Zalo hiện có. Chỉ khi phiên hết hạn hệ thống mới yêu cầu đăng nhập lại.`,
-        };
-      } catch (error) {
-        onCampaignCommit?.({
-          messageJobs: messageRecords.map((job) => ({
-            ...job,
-            status: 'failed',
-            statusLabel: 'Không thể gửi tin nhắn',
-            error: error.message,
-            provider: 'extension',
-          })),
-        });
+      // --- Strategy 2: Extension fallback (browser tab automation) ---
+      if (!backendOk) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang gửi ${messageRecords.length} tin nhắn qua extension...`,
+          });
 
-        messageSummary = {
-          severity: 'error',
-          message: error.message,
-        };
+          const response = await executeMessageJobs({
+            account: activeAccount,
+            jobs: messageRecords,
+          });
+
+          if (!response?.ok) {
+            throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin.');
+          }
+
+          const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
+          messageSummary = {
+            severity: 'info',
+            message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn. Kết quả sẽ cập nhật khi gửi xong.`,
+          };
+        } catch (error) {
+          onCampaignCommit?.({
+            messageJobs: messageRecords.map((job) => ({
+              ...job,
+              status: 'failed',
+              statusLabel: 'Không thể gửi tin nhắn',
+              error: error.message,
+              provider: 'extension',
+            })),
+          });
+
+          messageSummary = {
+            severity: 'error',
+            message: error.message,
+          };
+        }
       }
     }
 
