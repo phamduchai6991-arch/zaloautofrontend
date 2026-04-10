@@ -538,6 +538,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     stopPolling,
     updateAccountById,
     setActiveAccountIndex,
+    serverAccountCount,
   } = useAccount();
 
   const { maxAccounts, isActive, isExpired, planKey } = useSubscription();
@@ -693,10 +694,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       return;
     }
 
-    if (accounts.length >= maxAccounts) {
+    if (accounts.length >= maxAccounts || serverAccountCount >= maxAccounts) {
       setFeedback({
         severity: 'warning',
-        message: `Gói ${planKey?.toUpperCase() || 'hiện tại'} chỉ cho phép tối đa ${maxAccounts} tài khoản Zalo. Hãy nâng cấp gói để thêm nhiều hơn.`,
+        message: `Gói ${planKey?.toUpperCase() || 'hiện tại'} chỉ cho phép tối đa ${maxAccounts} tài khoản Zalo. Bạn đã đăng ký ${serverAccountCount}/${maxAccounts} trên hệ thống. Hãy nâng cấp gói để thêm nhiều hơn.`,
       });
       return;
     }

@@ -10,7 +10,9 @@ import {
   openZaloLogin,
 } from '../utils/extensionBridge';
 import { syncZaloCommonData } from '../utils/zaloRequestBuilder';
+import { useAuth } from './AuthContext';
 
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const STORAGE_KEY = 'zalotool_accounts';
 const ACTIVE_KEY = 'zalotool_active_idx';
 const INITIAL_SYNC_STATE = {
@@ -105,9 +107,52 @@ function canSyncAccount(account) {
   return hasStoredSession(account);
 }
 
+// ─── Server-side account tracking helpers ────────────────
+
+async function serverRegisterAccount({ userId, zaloId, zaloName, zaloAvatar, zaloPhone }) {
+  if (!API_BASE || !userId || !zaloId) return null;
+  try {
+    const res = await fetch(`${API_BASE}/api/accounts/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, zaloId, zaloName, zaloAvatar, zaloPhone }),
+    });
+    return await res.json();
+  } catch (e) {
+    console.warn('[Account] Server register failed:', e.message);
+    return null;
+  }
+}
+
+async function serverRemoveAccount(userId, zaloId) {
+  if (!API_BASE || !userId || !zaloId) return;
+  try {
+    await fetch(`${API_BASE}/api/accounts/remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, zaloId }),
+    });
+  } catch (e) {
+    console.warn('[Account] Server remove failed:', e.message);
+  }
+}
+
+async function serverGetAccounts(userId) {
+  if (!API_BASE || !userId) return [];
+  try {
+    const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`);
+    const data = await res.json();
+    return data.ok ? data.accounts : [];
+  } catch {
+    return [];
+  }
+}
+
 const AccountContext = createContext(null);
 
 export function AccountProvider({ children }) {
+  const { user } = useAuth();
+  const googleUserId = user?.sub || '';
   const extensionInvalidatedRef = useRef(false);
   const [extensionActive, setExtensionActive] = useState(false);
   const [extensionChecked, setExtensionChecked] = useState(false);
@@ -122,6 +167,15 @@ export function AccountProvider({ children }) {
   const [groups, setGroups] = useState([]);
   const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [receivedFriendRequests, setReceivedFriendRequests] = useState([]);
+  const [serverAccountCount, setServerAccountCount] = useState(0);
+
+  // Load server-side registered account count on login
+  useEffect(() => {
+    if (!googleUserId) return;
+    serverGetAccounts(googleUserId).then((list) => {
+      setServerAccountCount(list.length);
+    });
+  }, [googleUserId]);
 
   const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
   const syncing = isBusySyncPhase(syncState.phase);
@@ -297,6 +351,21 @@ export function AccountProvider({ children }) {
           return nextAccounts;
         });
 
+        // Register account server-side for limit enforcement
+        if (googleUserId) {
+          serverRegisterAccount({
+            userId: googleUserId,
+            zaloId: accountId,
+            zaloName: incomingAccount.name,
+            zaloAvatar: incomingAccount.avatar,
+            zaloPhone: incomingAccount.phone,
+          }).then((result) => {
+            if (result?.ok) {
+              serverGetAccounts(googleUserId).then((list) => setServerAccountCount(list.length));
+            }
+          });
+        }
+
         if (data.friends?.length) setFriends(data.friends);
         if (data.groups?.length) setGroups(data.groups);
         setSentFriendRequests(Array.isArray(incomingAccount.sentFriendRequests) ? incomingAccount.sentFriendRequests : []);
@@ -321,7 +390,7 @@ export function AccountProvider({ children }) {
       }
     });
     return unsub;
-  }, [updateAccountById]);
+  }, [updateAccountById, googleUserId]);
 
   useEffect(() => {
     if (!extensionActive || !isExtensionInvalidationError(syncState?.error)) {
@@ -474,6 +543,7 @@ export function AccountProvider({ children }) {
   }, [cancelPendingSync, syncState.phase, syncState.requestId]);
 
   const removeAccount = useCallback((index) => {
+    const removedAccount = accounts[index];
     setAccounts(prev => prev.filter((_, i) => i !== index));
     if (activeAccountIndex === index) {
       setActiveAccountIndex(-1);
@@ -484,7 +554,13 @@ export function AccountProvider({ children }) {
     } else if (activeAccountIndex > index) {
       setActiveAccountIndex(prev => prev - 1);
     }
-  }, [activeAccountIndex]);
+    // Remove from server-side tracking
+    if (googleUserId && removedAccount?.id) {
+      serverRemoveAccount(googleUserId, removedAccount.id).then(() => {
+        setServerAccountCount((prev) => Math.max(0, prev - 1));
+      });
+    }
+  }, [activeAccountIndex, accounts, googleUserId]);
 
   const refreshActiveAccountFromService = useCallback(async () => {
     const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
@@ -552,6 +628,7 @@ export function AccountProvider({ children }) {
     groups,
     sentFriendRequests,
     receivedFriendRequests,
+    serverAccountCount,
     addAccount,
     confirmPendingSync,
     cancelPendingSync,
