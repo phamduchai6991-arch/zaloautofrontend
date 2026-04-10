@@ -651,6 +651,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
   const handleAddAccount = async () => {
     if (!extensionChecked) return;
+    if (syncing) return;
     if (!extensionActive) {
       setShowExtDialog(true);
       return;
@@ -689,11 +690,13 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         return;
       }
     } catch (_) {
-      // Fall back to the login refresh flow below.
+      // Session refresh failed — do NOT open a login window on top.
     }
 
-    setFeedback({ severity: 'info', message: 'Đang mở lại luồng đăng nhập để làm mới toàn bộ dữ liệu tài khoản.' });
-    refreshAccount();
+    setFeedback({
+      severity: 'warning',
+      message: 'Không thể làm mới phiên Zalo. Nếu phiên hết hạn, hãy xóa tài khoản và thêm lại.',
+    });
   };
 
   const handleConfirmPendingSync = async () => {
