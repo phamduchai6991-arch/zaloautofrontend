@@ -19,6 +19,7 @@ export default function AccountsPage() {
     activeAccountIndex,
     setActiveAccountIndex,
     refreshActiveAccountFromService,
+    refreshAccount,
     removeAccount,
   } = useAccount();
   const { subscription, planKey, maxAccounts, isActive, isExpired, daysLeft } = useSubscription();
@@ -30,10 +31,14 @@ export default function AccountsPage() {
       const result = await refreshActiveAccountFromService();
       setFeedback({
         severity: result ? 'success' : 'warning',
-        message: result ? 'Đã đồng bộ lại tài khoản đang chọn từ local service.' : 'Không có dữ liệu mới để đồng bộ.',
+        message: result ? 'Đã đồng bộ lại phiên tài khoản qua extension.' : 'Không lấy được snapshot phiên mới từ extension. Web sẽ mở lại luồng đăng nhập để làm mới toàn bộ.',
       });
+      if (!result) {
+        await refreshAccount();
+      }
     } catch (error) {
-      setFeedback({ severity: 'error', message: error.message });
+      setFeedback({ severity: 'info', message: 'Đang mở lại luồng đăng nhập qua extension để làm mới tài khoản.' });
+      await refreshAccount();
     }
   };
 

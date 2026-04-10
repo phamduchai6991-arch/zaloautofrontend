@@ -45,13 +45,6 @@ import {
   executeMessageJobs,
 } from '../utils/extensionBridge';
 import {
-  checkLocalZaloService,
-  resolveGroupInviteTargetsViaLocalService,
-  runAccountActionJobsViaLocalService,
-  sendFriendRequestJobsViaLocalService,
-  sendMessageJobsViaLocalService,
-} from '../utils/localZaloService';
-import {
   sendFriendRequestRequest,
 } from '../utils/zaloRequestBuilder';
 import { normalizeFriendRow } from '../utils/zaloDataTransforms';
@@ -131,8 +124,9 @@ function buildInviteTargets(selectedItems, activeTab, activeAccount) {
 }
 
 async function resolveInviteTargets({ selectedItems, activeTab, activeAccount }) {
+  const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
+
   if (activeTab !== 1 && activeTab !== 2) {
-    const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
     return {
       targets,
       totals: {
@@ -146,44 +140,38 @@ async function resolveInviteTargets({ selectedItems, activeTab, activeAccount })
     };
   }
 
-  try {
-    const response = await resolveGroupInviteTargetsViaLocalService({
-      account: {
-        ...activeAccount,
-        userAgent: activeAccount?.userAgent || navigator.userAgent,
-      },
-      groups: selectedItems.map((item) => ({
-        groupId: item.zid || item.key,
-        name: item.name,
-      })),
-      userAgent: activeAccount?.userAgent || navigator.userAgent,
+  const existingFriendIds = new Set(
+    (Array.isArray(activeAccount?.friends) ? activeAccount.friends : [])
+      .map((friend) => String(friend?.userId || friend?.username || friend?.globalId || '').trim())
+      .filter(Boolean),
+  );
+  const selfId = String(activeAccount?.userId || '').trim();
+  const uniqueMemberIds = new Set();
+  let friendCount = 0;
+
+  selectedItems.forEach((groupItem) => {
+    const memberIds = Array.isArray(groupItem?.source?.memberIds) ? groupItem.source.memberIds : [];
+    memberIds.forEach((memberId) => {
+      const zid = String(memberId || '').trim();
+      if (!zid || zid === selfId || uniqueMemberIds.has(zid)) return;
+      uniqueMemberIds.add(zid);
+      if (existingFriendIds.has(zid)) {
+        friendCount += 1;
+      }
     });
+  });
 
-    return {
-      targets: Array.isArray(response?.targets) ? response.targets : [],
-      totals: response?.totals || {
-        totalMembers: 0,
-        friendCount: 0,
-        incomingRequestCount: 0,
-        outgoingRequestCount: 0,
-        inviteableCount: 0,
-      },
-      summaries: Array.isArray(response?.summaries) ? response.summaries : [],
-    };
-  } catch (_) {
-    const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
-    return {
-      targets,
-      totals: {
-        totalMembers: targets.length,
-        friendCount: 0,
-        incomingRequestCount: 0,
-        outgoingRequestCount: 0,
-        inviteableCount: targets.length,
-      },
-      summaries: [],
-    };
-  }
+  return {
+    targets,
+    totals: {
+      totalMembers: uniqueMemberIds.size,
+      friendCount,
+      incomingRequestCount: 0,
+      outgoingRequestCount: 0,
+      inviteableCount: targets.length,
+    },
+    summaries: [],
+  };
 }
 
 function getAccountPrimaryLabel(account, index) {
@@ -495,7 +483,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
   const [extensionFallbackDialog, setExtensionFallbackDialog] = useState({ open: false, jobs: [], error: '', running: false });
-  const [localServiceReady, setLocalServiceReady] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [pullGroupFriendIds, setPullGroupFriendIds] = useState([]);
   const [pullGroupSearchQuery, setPullGroupSearchQuery] = useState('');
@@ -643,25 +630,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   }, [campaignState]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const probe = async () => {
-      const ok = await checkLocalZaloService();
-      if (!cancelled) {
-        setLocalServiceReady(ok);
-      }
-    };
-
-    probe();
-    const intervalId = setInterval(probe, 10000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!syncState?.error) return;
     if (syncState.phase !== 'failed' && syncState.phase !== 'cancelled') return;
     setFeedback({
@@ -710,15 +678,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     if (!hasAccount || syncing) return;
 
     try {
-      const servicePatch = await refreshActiveAccountFromService();
-      if (servicePatch) {
-        setFeedback({ severity: 'success', message: 'Đã làm mới dữ liệu tài khoản từ local service.' });
+      const extensionPatch = await refreshActiveAccountFromService();
+      if (extensionPatch) {
+        setFeedback({ severity: 'success', message: 'Đã làm mới phiên tài khoản qua extension.' });
         return;
       }
     } catch (_) {
-      // Fall back to the extension-based refresh flow below.
+      // Fall back to the login refresh flow below.
     }
 
+    setFeedback({ severity: 'info', message: 'Đang mở lại luồng đăng nhập để làm mới toàn bộ dữ liệu tài khoản.' });
     refreshAccount();
   };
 
@@ -1042,107 +1011,36 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     let actionSummary = null;
 
     if (!isScheduled && actionRecords.length > 0) {
-      let resolvedActionJobs = [];
-
-      try {
-        setFeedback({
-          severity: 'info',
-          message: `Đang chạy ${actionRecords.length} thao tác qua local service...`,
-        });
-
-        const response = await runAccountActionJobsViaLocalService({
-          account: {
-            ...activeAccount,
-            userAgent: activeAccount?.userAgent || navigator.userAgent,
-          },
-          jobs: actionRecords,
-          userAgent: activeAccount?.userAgent || navigator.userAgent,
-        });
-
-        resolvedActionJobs = mergeActionResultsIntoJobs(actionRecords, response?.results, 'local-service');
-
-        hideProcessedContactRows(activeAccount, resolvedActionJobs, deletePhoneAfterActionEnabled);
-
-        onCampaignCommit?.({
-          actionJobs: resolvedActionJobs,
-        });
-
-        const successCount = resolvedActionJobs.filter((job) => job.status !== 'failed').length;
-        const failedCount = resolvedActionJobs.length - successCount;
-
-        if (successCount > 0 && failedCount === 0) {
-          actionSummary = {
-            severity: 'success',
-            message: `Đã chạy ${successCount}/${resolvedActionJobs.length} thao tác thành công.`,
-          };
-        } else if (successCount > 0) {
-          actionSummary = {
-            severity: 'warning',
-            message: `Đã chạy thành công ${successCount}/${resolvedActionJobs.length} thao tác. ${failedCount} thao tác còn lại bị lỗi.`,
-          };
-        } else {
-          throw new Error(buildActionFailureMessage(
-            resolvedActionJobs,
-            response?.error || 'Không thực thi được thao tác nào từ cột phải.',
-          ));
-        }
-
-        if (resolvedActionJobs.some((job) => job.status !== 'failed')) {
-          const optimisticPatch = applyOptimisticActionResults(activeAccount, resolvedActionJobs);
-          if (optimisticPatch && activeAccount?.id) {
-            updateAccountById(activeAccount.id, optimisticPatch);
-          }
-
-          try {
-            await refreshActiveAccountFromService();
-          } catch (_) {
-            // Keep the completed action state even if a follow-up refresh is temporarily unavailable.
-          }
-        }
-      } catch (error) {
-        const failedActionJobs = actionRecords.map((job) => ({
+      const actionMessage = 'Các thao tác quản lý hàng loạt như xóa bạn, rời nhóm, kéo nhóm, bật/tắt thông báo và xử lý lời mời hiện chưa hỗ trợ ở chế độ chỉ dùng extension.';
+      onCampaignCommit?.({
+        actionJobs: actionRecords.map((job) => ({
           ...job,
           status: 'failed',
-          statusLabel: 'Thao tác thất bại',
-          error: error.message,
-          provider: 'local-service',
-        }));
-
-        onCampaignCommit?.({
-          actionJobs: failedActionJobs,
-        });
-
-        actionSummary = {
-          severity: 'error',
-          message: error.message,
-        };
-      }
+          statusLabel: 'Chưa hỗ trợ ở chế độ extension-only',
+          error: actionMessage,
+          provider: 'extension',
+        })),
+      });
+      actionSummary = {
+        severity: 'warning',
+        message: actionMessage,
+      };
     }
 
     if (!isScheduled && inviteRecords.length > 0) {
       let resolvedInviteJobs = [];
 
       try {
-        if (!(messageTargetsAreGroups && inviteResolution?.totals)) {
-          setFeedback({
-            severity: 'info',
-            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua local service...`,
-          });
-        }
-
-        const response = await sendFriendRequestJobsViaLocalService({
-          account: {
-            ...activeAccount,
-            userAgent: activeAccount?.userAgent || navigator.userAgent,
-          },
-          jobs: inviteRecords,
-          userAgent: activeAccount?.userAgent || navigator.userAgent,
+        setFeedback({
+          severity: 'info',
+          message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua extension...`,
         });
 
+        const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
         resolvedInviteJobs = mergeInviteResultsIntoJobs(
           inviteRecords,
           response?.results,
-          'local-service',
+          'extension',
         );
 
         hideProcessedContactRows(activeAccount, resolvedInviteJobs, deletePhoneAfterActionEnabled);
@@ -1157,87 +1055,31 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         if (processedCount > 0 && failedCount === 0) {
           inviteSummary = {
             severity: 'success',
-            message: `Đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn qua local service.`,
+            message: `Extension đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn thành công.`,
           };
         } else if (processedCount > 0) {
           inviteSummary = {
             severity: 'warning',
-            message: `Local service xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
+            message: `Extension xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
           };
         } else {
-          throw new Error(response?.error || 'Local service không xử lý được lời mời kết bạn nào.');
+          throw new Error('Extension không xử lý được lời mời kết bạn nào.');
         }
-      } catch (serviceError) {
-        if (!extensionActive) {
-          const failedInviteJobs = inviteRecords.map((job) => ({
+      } catch (error) {
+        onCampaignCommit?.({
+          inviteJobs: inviteRecords.map((job) => ({
             ...job,
             status: 'failed',
-            statusLabel: 'Không có local service',
-            error: serviceError.message,
-            provider: 'local-service',
-          }));
+            statusLabel: 'Không thể kết nối extension',
+            error: error.message,
+            provider: 'extension',
+          })),
+        });
 
-          onCampaignCommit?.({
-            inviteJobs: failedInviteJobs,
-          });
-
-          inviteSummary = {
-            severity: 'error',
-            message: serviceError.message,
-          };
-        } else {
-          setFeedback({
-            severity: 'warning',
-            message: `Local service lỗi, đang chuyển sang extension để kết bạn: ${serviceError.message}`,
-          });
-
-          try {
-            const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
-            resolvedInviteJobs = mergeInviteResultsIntoJobs(
-              inviteRecords,
-              response?.results,
-              'extension',
-            );
-
-            hideProcessedContactRows(activeAccount, resolvedInviteJobs, deletePhoneAfterActionEnabled);
-
-            onCampaignCommit?.({
-              inviteJobs: resolvedInviteJobs,
-            });
-
-            const processedCount = resolvedInviteJobs.filter((job) => job.status !== 'failed').length;
-            const failedCount = resolvedInviteJobs.length - processedCount;
-
-            if (processedCount > 0 && failedCount === 0) {
-              inviteSummary = {
-                severity: 'success',
-                message: `Extension đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn thành công.`,
-              };
-            } else if (processedCount > 0) {
-              inviteSummary = {
-                severity: 'warning',
-                message: `Extension xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
-              };
-            } else {
-              throw new Error('Extension không xử lý được lời mời kết bạn nào.');
-            }
-          } catch (error) {
-            onCampaignCommit?.({
-              inviteJobs: inviteRecords.map((job) => ({
-                ...job,
-                status: 'failed',
-                statusLabel: 'Không thể kết nối extension',
-                error: error.message,
-                provider: 'extension',
-              })),
-            });
-
-            inviteSummary = {
-              severity: 'error',
-              message: error.message,
-            };
-          }
-        }
+        inviteSummary = {
+          severity: 'error',
+          message: error.message,
+        };
       }
 
       const optimisticSentRequests = resolvedInviteJobs
@@ -1268,7 +1110,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         try {
           await refreshActiveAccountFromService();
         } catch (_) {
-          // Keep optimistic invite state if service refresh is temporarily unavailable.
+          // Keep optimistic invite state if a follow-up extension snapshot is temporarily unavailable.
         }
       }
     }
@@ -1277,75 +1119,38 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       try {
         setFeedback({
           severity: 'info',
-          message: `Đang gửi ${messageRecords.length} tin nhắn qua local service...`,
+          message: `Đang chuyển ${messageRecords.length} tin nhắn sang extension để gửi trên tab Zalo thật...`,
         });
 
-        const response = await sendMessageJobsViaLocalService({
-          account: {
-            ...activeAccount,
-            userAgent: activeAccount?.userAgent || navigator.userAgent,
-          },
+        const response = await executeMessageJobs({
+          account: activeAccount,
           jobs: messageRecords,
-          userAgent: activeAccount?.userAgent || navigator.userAgent,
         });
 
-        const resolvedJobs = mergeServiceResultsIntoJobs(
-          messageRecords,
-          response?.results,
-          'local-service',
-        );
+        if (!response?.ok) {
+          throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên tab Zalo.');
+        }
 
-        hideProcessedContactRows(activeAccount, resolvedJobs, deletePhoneAfterActionEnabled);
-
+        const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
+        messageSummary = {
+          severity: 'info',
+          message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn và đang gửi trên tab Zalo thật. Trạng thái sẽ cập nhật tự động bên phải.`,
+        };
+      } catch (error) {
         onCampaignCommit?.({
-          messageJobs: resolvedJobs,
+          messageJobs: messageRecords.map((job) => ({
+            ...job,
+            status: 'failed',
+            statusLabel: 'Không thể kết nối extension',
+            error: error.message,
+            provider: 'extension',
+          })),
         });
 
-        const sentCount = resolvedJobs.filter((job) => job.status === 'sent').length;
-        const failedCount = resolvedJobs.length - sentCount;
-
-        if (sentCount > 0 && failedCount === 0) {
-          messageSummary = {
-            severity: 'success',
-            message: `Local service đã gửi ${sentCount}/${resolvedJobs.length} tin nhắn thành công.`,
-          };
-        } else if (sentCount > 0) {
-          messageSummary = {
-            severity: 'warning',
-            message: `Local service gửi thành công ${sentCount}/${resolvedJobs.length} tin nhắn. ${failedCount} tin còn lại bị lỗi.`,
-          };
-        } else {
-          throw new Error(response?.error || 'Local service không gửi được tin nhắn nào.');
-        }
-      } catch (serviceError) {
-        if (!extensionActive) {
-          onCampaignCommit?.({
-            messageJobs: messageRecords.map((job) => ({
-              ...job,
-              status: 'failed',
-              statusLabel: 'Không có local service',
-              error: serviceError.message,
-              provider: 'local-service',
-            })),
-          });
-
-          messageSummary = {
-            severity: 'error',
-            message: serviceError.message,
-          };
-        } else {
-          setExtensionFallbackDialog({
-            open: true,
-            jobs: messageRecords,
-            error: serviceError.message,
-            running: false,
-          });
-
-          messageSummary = {
-            severity: 'warning',
-            message: `Local service đang không phản hồi. Nếu tiếp tục, hệ thống sẽ mở tab Zalo thật qua extension để gửi ${messageRecords.length} tin nhắn.`,
-          };
-        }
+        messageSummary = {
+          severity: 'error',
+          message: error.message,
+        };
       }
     }
 
@@ -1453,8 +1258,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           <Typography variant="body2" color="text.secondary">
             Bạn bè: {activeAccount?.friends?.length || 0} | Nhóm: {activeAccount?.groups?.length || 0}
           </Typography>
-          <Typography variant="body2" color={localServiceReady === false ? 'error.main' : 'text.secondary'}>
-            Local service: {localServiceReady == null ? 'Đang kiểm tra...' : localServiceReady ? 'Sẵn sàng gửi qua request nội bộ' : 'Không kết nối được, sẽ cần extension nếu tiếp tục'}
+          <Typography variant="body2" color={extensionActive ? 'success.main' : 'error.main'}>
+            Extension: {extensionActive ? 'Đã kết nối, web đang chạy ở chế độ extension-only' : 'Chưa kết nối, cần cài hoặc reload extension'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Đang chọn: {selectedCount}/{selection?.allItems?.length || 0} mục từ tab {selectedLabel}

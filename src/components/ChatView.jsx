@@ -13,7 +13,7 @@ import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import GroupIcon from '@mui/icons-material/Group';
 import { zFetch, onIncomingMessages } from '../utils/extensionBridge';
-import { checkLocalZaloService, sendMessageJobsViaLocalService } from '../utils/localZaloService';
+import { sendTextMessageRequest } from '../utils/zaloRequestBuilder';
 
 function formatMessageTime(ts) {
   if (!ts) return '';
@@ -280,60 +280,17 @@ export default function ChatView({ conversation, account, accountReady = false, 
     setInputValue('');
 
     try {
-      let sent = false;
-
-      // Try local service first
-      const serviceReady = await checkLocalZaloService();
-      if (serviceReady) {
-        try {
-          const response = await sendMessageJobsViaLocalService({
-            account: {
-              ...account,
-              userAgent: account.userAgent || navigator.userAgent,
-            },
-            jobs: [{
-              id: tempMsg.msgId,
-              zid: conversation.id || conversation.rawId,
-              isGroup: conversation.isGroup,
-              content: text,
-            }],
-            userAgent: account.userAgent || navigator.userAgent,
-          });
-
-          const jobResult = response?.results?.[0];
-          if (jobResult && !jobResult.ok) {
-            throw new Error(jobResult.error || 'Gửi tin nhắn thất bại qua local service.');
-          }
-          sent = true;
-        } catch (serviceError) {
-          console.warn('[ChatView] Local service send failed, trying extension:', serviceError.message);
-          // Fall through to extension
-        }
-      }
-
-      // Fallback to extension if service failed or unavailable
-      if (!sent && extensionActive) {
-        const response = await zFetch({
-          account,
-          request: {
-            method: 'sendZText',
-            args: {
-              toId: conversation.id || conversation.rawId,
-              isGroup: conversation.isGroup,
-              message: text,
-            },
-          },
-        });
-
-        if (response && !response.ok) {
-          throw new Error(response.error || 'Extension gửi tin nhắn thất bại.');
-        }
-        sent = true;
-      }
-
-      if (!sent) {
+      if (!extensionActive) {
         throw new Error('Không có kênh gửi tin nhắn khả dụng. Hãy làm mới tài khoản hoặc bật extension.');
       }
+
+      await sendTextMessageRequest(account, {
+        id: tempMsg.msgId,
+        zid: conversation.id || conversation.rawId,
+        isGroup: conversation.isGroup,
+        content: text,
+        sourceTab: conversation.isGroup ? 'group' : 'friend',
+      });
 
       setMessages((prev) =>
         prev.map((m) =>

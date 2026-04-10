@@ -7,7 +7,7 @@ import {
   onExtensionMessage,
   openZaloLogin,
 } from '../utils/extensionBridge';
-import { checkLocalZaloService, syncAccountViaLocalService } from '../utils/localZaloService';
+import { syncZaloCommonData } from '../utils/zaloRequestBuilder';
 
 const STORAGE_KEY = 'zalotool_accounts';
 const ACTIVE_KEY = 'zalotool_active_idx';
@@ -95,16 +95,9 @@ function canSyncAccount(account) {
   return hasStoredSession(account);
 }
 
-function hasIncompleteAccountProfile(account) {
-  const name = String(account?.name || '').trim().toLowerCase();
-  const hasReadableName = Boolean(name) && name !== 'tài khoản zalo' && !name.startsWith('zid ');
-  return !hasReadableName || !account?.avatar;
-}
-
 const AccountContext = createContext(null);
 
 export function AccountProvider({ children }) {
-  const initialServiceSyncRef = useRef(false);
   const extensionInvalidatedRef = useRef(false);
   const [extensionActive, setExtensionActive] = useState(false);
   const [extensionChecked, setExtensionChecked] = useState(false);
@@ -128,58 +121,19 @@ export function AccountProvider({ children }) {
     )));
   }, []);
 
-  const buildServicePatch = useCallback((responseData, currentAccount = null) => {
-    const profile = responseData?.profile || {};
-    return {
-      name: profile.displayName || profile.zaloName || currentAccount?.name || undefined,
-      avatar: profile.avatar || currentAccount?.avatar || undefined,
-      phone: profile.phoneNumber || currentAccount?.phone || undefined,
-      friends: Array.isArray(responseData?.friends) ? responseData.friends : [],
-      groups: Array.isArray(responseData?.groups) ? responseData.groups : [],
-      sentFriendRequests: Array.isArray(responseData?.sentFriendRequests) ? responseData.sentFriendRequests : [],
-      receivedFriendRequests: Array.isArray(responseData?.receivedFriendRequests) ? responseData.receivedFriendRequests : [],
-      serviceSyncedAt: responseData?.syncedAt || new Date().toISOString(),
-      userAgent: responseData?.userAgent || navigator.userAgent,
-      syncStatus: currentAccount?.syncStatus || 'ready',
-    };
-  }, []);
-
-  const syncAccountWithLocalService = useCallback(async (account) => {
+  const refreshAccountSessionFromExtension = useCallback(async (account) => {
     if (!canSyncAccount(account)) return null;
+    if (!extensionActive) {
+      throw new Error('Extension chưa sẵn sàng. Hãy bật extension rồi thử lại.');
+    }
 
-    const response = await syncAccountViaLocalService({
-      account: {
-        ...account,
-        userAgent: account.userAgent || navigator.userAgent,
-      },
+    const sessionPatch = await syncZaloCommonData(account);
+    return {
+      ...sessionPatch,
       userAgent: account.userAgent || navigator.userAgent,
-    });
-
-    return buildServicePatch(response?.data || {}, account);
-  }, [buildServicePatch]);
-
-  const syncStoredAccountsOnLoad = useCallback(async () => {
-    if (!accounts.length) return;
-
-    const serviceReady = await checkLocalZaloService();
-    if (!serviceReady) {
-      console.warn('[Account] Auto-sync skipped because local service is unavailable.');
-      return;
-    }
-
-    for (const account of accounts) {
-      if (!canSyncAccount(account)) continue;
-
-      try {
-        const servicePatch = await syncAccountWithLocalService(account);
-        if (servicePatch) {
-          updateAccountById(account.id, servicePatch);
-        }
-      } catch (error) {
-        console.warn('[Account] Auto-sync failed for account:', account?.name || account?.id, error?.message || error);
-      }
-    }
-  }, [accounts, syncAccountWithLocalService, updateAccountById]);
+      syncStatus: 'ready',
+    };
+  }, [extensionActive]);
 
   useEffect(() => {
     if (accounts.length === 0) {
@@ -231,71 +185,6 @@ export function AccountProvider({ children }) {
     }, 10000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
-
-  useEffect(() => {
-    if (initialServiceSyncRef.current || accounts.length === 0) return;
-
-    initialServiceSyncRef.current = true;
-    let cancelled = false;
-
-    const run = async () => {
-      await syncStoredAccountsOnLoad();
-      if (cancelled) return;
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accounts.length, syncStoredAccountsOnLoad]);
-
-  useEffect(() => {
-    const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
-    if (!activeAccount || !canSyncAccount(activeAccount) || !hasIncompleteAccountProfile(activeAccount)) {
-      return;
-    }
-
-    let cancelled = false;
-    let failCount = 0;
-
-    const run = async () => {
-      const serviceReady = await checkLocalZaloService();
-      if (!serviceReady || cancelled) return;
-
-      try {
-        const servicePatch = await syncAccountWithLocalService(activeAccount);
-        if (!cancelled && servicePatch) {
-          updateAccountById(activeAccount.id, servicePatch);
-          failCount = 0;
-        }
-      } catch (error) {
-        failCount++;
-        console.warn('[Account] Profile hydration failed (' + failCount + '):', error?.message || error);
-        // Stop retrying after 3 consecutive failures to avoid hammering a broken service
-        if (failCount >= 3) {
-          console.warn('[Account] Stopping profile hydration retry after', failCount, 'failures');
-          return;
-        }
-      }
-    };
-
-    run();
-
-    // Retry every 30s (instead of 15s), auto-stops after 3 failures
-    const intervalId = setInterval(() => {
-      if (failCount >= 3) {
-        clearInterval(intervalId);
-        return;
-      }
-      run();
-    }, 30000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-    };
-  }, [accounts, activeAccountIndex, syncAccountWithLocalService, updateAccountById]);
 
   // Listen for messages from the extension
   useEffect(() => {
@@ -385,15 +274,6 @@ export function AccountProvider({ children }) {
         setSentFriendRequests(Array.isArray(incomingAccount.sentFriendRequests) ? incomingAccount.sentFriendRequests : []);
         setReceivedFriendRequests(Array.isArray(incomingAccount.receivedFriendRequests) ? incomingAccount.receivedFriendRequests : []);
 
-        try {
-          const servicePatch = await syncAccountWithLocalService(incomingAccount);
-          if (servicePatch) {
-            updateAccountById(accountId, servicePatch);
-          }
-        } catch (error) {
-          console.warn('[Account] Local service sync failed:', error?.message || error);
-        }
-
         setSyncState((prev) => ({
           ...prev,
           phase: 'ready',
@@ -413,7 +293,7 @@ export function AccountProvider({ children }) {
       }
     });
     return unsub;
-  }, [syncAccountWithLocalService, updateAccountById]);
+  }, [updateAccountById]);
 
   useEffect(() => {
     if (!extensionActive || !isExtensionInvalidationError(syncState?.error)) {
@@ -582,12 +462,12 @@ export function AccountProvider({ children }) {
     const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
     if (!activeAccount) return null;
 
-    const servicePatch = await syncAccountWithLocalService(activeAccount);
-    if (servicePatch) {
-      updateAccountById(activeAccount.id, servicePatch);
+    const extensionPatch = await refreshAccountSessionFromExtension(activeAccount);
+    if (extensionPatch) {
+      updateAccountById(activeAccount.id, extensionPatch);
     }
-    return servicePatch;
-  }, [accounts, activeAccountIndex, syncAccountWithLocalService, updateAccountById]);
+    return extensionPatch;
+  }, [accounts, activeAccountIndex, refreshAccountSessionFromExtension, updateAccountById]);
 
   const value = {
     extensionActive,
