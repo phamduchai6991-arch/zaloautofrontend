@@ -397,6 +397,34 @@ function delay(ms) {
   });
 }
 
+async function readNdjsonStream(response, onLine, onDone) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const data = JSON.parse(line);
+        if (data._done) { onDone?.(data); }
+        else { onLine(data); }
+      } catch (_) { /* skip malformed line */ }
+    }
+  }
+  if (buffer.trim()) {
+    try {
+      const data = JSON.parse(buffer);
+      if (data._done) onDone?.(data);
+      else onLine(data);
+    } catch (_) { /* skip */ }
+  }
+}
+
 function mergeInviteResultsIntoJobs(jobs, results, providerLabel) {
   const resultMap = new Map(
     (Array.isArray(results) ? results : []).map((item) => [item.jobId, item]),
@@ -976,27 +1004,75 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     let actionSummary = null;
 
     if (!isScheduled && actionRecords.length > 0) {
-      const actionMessage = 'Các thao tác quản lý hàng loạt như xóa bạn, rời nhóm, kéo nhóm, bật/tắt thông báo và xử lý lời mời hiện chưa hỗ trợ ở chế độ chỉ dùng extension.';
-      onCampaignCommit?.({
-        actionJobs: actionRecords.map((job) => ({
-          ...job,
-          status: 'failed',
-          statusLabel: 'Chưa hỗ trợ ở chế độ extension-only',
-          error: actionMessage,
-          provider: 'extension',
-        })),
-      });
-      actionSummary = {
-        severity: 'warning',
-        message: actionMessage,
-      };
+      let backendActionOk = false;
+
+      // --- Strategy 1: Backend API ---
+      if (API_BASE) {
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang thực thi ${actionRecords.length} thao tác quản lý qua server...`,
+          });
+
+          const res = await fetch(`${API_BASE}/api/zalo/actions/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              account: activeAccount,
+              jobs: actionRecords,
+            }),
+          });
+
+          const result = await res.json();
+
+          if (result?.ok && Array.isArray(result.results)) {
+            backendActionOk = true;
+
+            onCampaignCommit?.({
+              actionJobs: result.results.map((r) => ({
+                ...(actionRecords.find((j) => j.id === r.jobId) || {}),
+                ...r,
+                provider: 'server',
+              })),
+            });
+
+            const sent = Number(result.accepted || 0);
+            const failed = Number(result.failed || 0);
+
+            actionSummary = {
+              severity: failed > 0 ? 'warning' : 'success',
+              message: `Server đã xử lý ${sent}/${actionRecords.length} thao tác.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
+            };
+          }
+        } catch (_) {
+          // Backend unreachable — fall through
+        }
+      }
+
+      // --- No backend: mark as unsupported ---
+      if (!backendActionOk) {
+        const actionMessage = 'Các thao tác quản lý hàng loạt hiện chưa hỗ trợ khi backend không khả dụng.';
+        onCampaignCommit?.({
+          actionJobs: actionRecords.map((job) => ({
+            ...job,
+            status: 'failed',
+            statusLabel: 'Backend không khả dụng',
+            error: actionMessage,
+            provider: 'extension',
+          })),
+        });
+        actionSummary = {
+          severity: 'warning',
+          message: actionMessage,
+        };
+      }
     }
 
     if (!isScheduled && inviteRecords.length > 0) {
       let resolvedInviteJobs = [];
       let backendInviteOk = false;
 
-      // --- Strategy 1: Backend API (zalo-api-final) ---
+      // --- Strategy 1: Backend API (zalo-api-final, NDJSON streaming) ---
       if (API_BASE) {
         try {
           setFeedback({
@@ -1013,15 +1089,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             }),
           });
 
-          const result = await res.json();
-
-          if (result?.ok && Array.isArray(result.results)) {
+          if (res.ok && res.body) {
             backendInviteOk = true;
-            resolvedInviteJobs = mergeInviteResultsIntoJobs(
-              inviteRecords,
-              result.results,
-              'server',
-            );
+            await readNdjsonStream(res, (data) => {
+              const originalJob = inviteRecords.find((j) => j.id === data.jobId) || {};
+              const mergedJob = { ...originalJob, ...data };
+              onCampaignCommit?.({ inviteJobs: [mergedJob] });
+              if (data.status !== 'running') {
+                resolvedInviteJobs.push(mergedJob);
+              }
+            });
           }
         } catch (_) {
           // Backend unreachable — fall through to extension
@@ -1124,7 +1201,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     if (!isScheduled && messageRecords.length > 0) {
       let backendOk = false;
 
-      // --- Strategy 1: Backend API (zalo-api-final, direct HTTP, most reliable) ---
+      // --- Strategy 1: Backend API (zalo-api-final, NDJSON streaming) ---
       if (API_BASE) {
         try {
           setFeedback({
@@ -1141,26 +1218,24 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             }),
           });
 
-          const result = await res.json();
-
-          if (result?.ok) {
+          if (res.ok && res.body) {
             backendOk = true;
-            const sent = Number(result.accepted || 0);
-            const failed = Number(result.failed || 0);
+            let accepted = 0;
+            let failed = 0;
 
-            if (Array.isArray(result.results)) {
+            await readNdjsonStream(res, (data) => {
+              const originalJob = messageRecords.find((j) => j.id === data.jobId) || {};
               onCampaignCommit?.({
-                messageJobs: result.results.map((r) => ({
-                  ...messageRecords.find((j) => j.id === r.jobId) || {},
-                  ...r,
-                  provider: 'server',
-                })),
+                messageJobs: [{ ...originalJob, ...data }],
               });
-            }
+            }, (summary) => {
+              accepted = summary.accepted || 0;
+              failed = summary.failed || 0;
+            });
 
             messageSummary = {
               severity: failed > 0 ? 'warning' : 'success',
-              message: `Server đã gửi ${sent}/${messageRecords.length} tin nhắn.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
+              message: `Server đã gửi ${accepted}/${messageRecords.length} tin nhắn.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
             };
           }
         } catch (_) {
