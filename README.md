@@ -31,3 +31,16 @@ npm run dev             # http://localhost:3001
 |----------|-------------|
 | `VITE_GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `VITE_BACKEND_URL` | Backend API URL (empty = same domain) |
+| `VITE_ADMIN_EMAIL` | Optional email used to show the admin shortcut in the sidebar |
+
+## Render Deploy
+
+This repo now includes `render.yaml` for a Render static site deployment.
+
+Set these environment variables in Render:
+
+- `VITE_BACKEND_URL` = backend Render URL, for example `https://autozalo-backend.onrender.com`
+- `VITE_GOOGLE_CLIENT_ID`
+- `VITE_ADMIN_EMAIL` = admin
+
+The static site uses an SPA rewrite so all frontend routes, including `/admin`, resolve to `index.html`.
