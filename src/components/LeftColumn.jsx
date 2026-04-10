@@ -1,0 +1,2033 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Avatar,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  InputAdornment,
+  MenuItem,
+  Paper,
+  Checkbox,
+  Select,
+  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  AutoAwesome as AiIcon,
+  CalendarMonth as CalendarIcon,
+  Close as CloseIcon,
+  FlashOn as FlashIcon,
+  Image as ImageIcon,
+  ListAlt as ListIcon,
+  Refresh as RefreshIcon,
+  Search as SearchIcon,
+  Send as SendIcon,
+  Settings as SettingsIcon,
+} from '@mui/icons-material';
+import { useAccount } from '../contexts/AccountContext';
+import {
+  executeMessageJobs,
+} from '../utils/extensionBridge';
+import {
+  checkLocalZaloService,
+  resolveGroupInviteTargetsViaLocalService,
+  runAccountActionJobsViaLocalService,
+  sendFriendRequestJobsViaLocalService,
+  sendMessageJobsViaLocalService,
+} from '../utils/localZaloService';
+import {
+  sendFriendRequestRequest,
+} from '../utils/zaloRequestBuilder';
+import { normalizeFriendRow } from '../utils/zaloDataTransforms';
+import {
+  buildActionRecords,
+  buildInviteRecords,
+  buildMessageRecords,
+} from '../features/campaigns/jobBuilders';
+import {
+  getTabActionKeys,
+  getUnsupportedActionLabels,
+  SUPPORTED_REMOTE_ACTION_KEYS,
+} from '../utils/reachActionConfig';
+import { hideContactsForAccount } from '../utils/reachVisibilityStore';
+
+const QUICK_TEMPLATES = [
+  'Chào bạn, mình kết nối để trao đổi công việc nếu bạn thuận tiện nhé.',
+  'Xin chào, mình gửi lời chào và rất mong được kết nối với bạn trên Zalo.',
+  'Chào bạn, mình đang có một số thông tin phù hợp và muốn gửi bạn tham khảo.',
+];
+
+function buildRewriteOptions(text) {
+  if (!text.trim()) return [];
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return [
+    `${compact}`,
+    `Chào bạn, ${compact.charAt(0).toLowerCase()}${compact.slice(1)}`,
+    `${compact}. Nếu phù hợp, mình rất mong được phản hồi từ bạn.`,
+  ];
+}
+
+function isGenericAccountName(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return !text || text === 'tài khoản zalo';
+}
+
+function buildInviteTargets(selectedItems, activeTab, activeAccount) {
+  if (!Array.isArray(selectedItems) || selectedItems.length === 0) return [];
+
+  if (activeTab !== 1 && activeTab !== 2) {
+    return selectedItems.map((item) => ({
+      key: item.key || item.zid,
+      name: item.name,
+      avatar: item.avatar,
+      phone: item.phone,
+      zid: item.zid || item.classification || '—',
+      sourceTab: item.sourceTab,
+    }));
+  }
+
+  const existingFriendIds = new Set(
+    (Array.isArray(activeAccount?.friends) ? activeAccount.friends : [])
+      .map((friend) => String(friend?.userId || friend?.username || friend?.globalId || '').trim())
+      .filter(Boolean),
+  );
+  const selfId = String(activeAccount?.userId || '').trim();
+  const dedupedTargets = new Map();
+
+  selectedItems.forEach((groupItem) => {
+    const memberIds = Array.isArray(groupItem?.source?.memberIds) ? groupItem.source.memberIds : [];
+    memberIds.forEach((memberId) => {
+      const zid = String(memberId || '').trim();
+      if (!zid || zid === selfId || existingFriendIds.has(zid) || dedupedTargets.has(zid)) return;
+
+      dedupedTargets.set(zid, {
+        key: `${groupItem.key || groupItem.zid}_${zid}`,
+        name: `Thành viên ${groupItem.name || 'nhóm'}`,
+        avatar: '',
+        phone: '—',
+        zid,
+        sourceTab: groupItem.name || 'Nhóm',
+      });
+    });
+  });
+
+  return Array.from(dedupedTargets.values());
+}
+
+async function resolveInviteTargets({ selectedItems, activeTab, activeAccount }) {
+  if (activeTab !== 1 && activeTab !== 2) {
+    const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
+    return {
+      targets,
+      totals: {
+        totalMembers: targets.length,
+        friendCount: 0,
+        incomingRequestCount: 0,
+        outgoingRequestCount: 0,
+        inviteableCount: targets.length,
+      },
+      summaries: [],
+    };
+  }
+
+  try {
+    const response = await resolveGroupInviteTargetsViaLocalService({
+      account: {
+        ...activeAccount,
+        userAgent: activeAccount?.userAgent || navigator.userAgent,
+      },
+      groups: selectedItems.map((item) => ({
+        groupId: item.zid || item.key,
+        name: item.name,
+      })),
+      userAgent: activeAccount?.userAgent || navigator.userAgent,
+    });
+
+    return {
+      targets: Array.isArray(response?.targets) ? response.targets : [],
+      totals: response?.totals || {
+        totalMembers: 0,
+        friendCount: 0,
+        incomingRequestCount: 0,
+        outgoingRequestCount: 0,
+        inviteableCount: 0,
+      },
+      summaries: Array.isArray(response?.summaries) ? response.summaries : [],
+    };
+  } catch (_) {
+    const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
+    return {
+      targets,
+      totals: {
+        totalMembers: targets.length,
+        friendCount: 0,
+        incomingRequestCount: 0,
+        outgoingRequestCount: 0,
+        inviteableCount: targets.length,
+      },
+      summaries: [],
+    };
+  }
+}
+
+function getAccountPrimaryLabel(account, index) {
+  if (!account) return 'Chưa chọn tài khoản';
+  if (!isGenericAccountName(account.name)) return account.name;
+  if (account.phone) return account.phone;
+  if (account.userId) return `ZID ${account.userId}`;
+  return `Tài khoản ${Number(index) + 1}`;
+}
+
+function getAccountSecondaryLabel(account) {
+  if (!account) return '';
+  const parts = [];
+  if (account.phone && !isGenericAccountName(account.name)) parts.push(account.phone);
+  if (account.userId) parts.push(`ZID ${account.userId}`);
+  else if (account.UIN) parts.push(`UIN ${account.UIN}`);
+  return parts.join(' | ');
+}
+
+function isExtensionInvalidationError(value) {
+  return /extension context invalidated|tai lai trang sau khi reload extension/i.test(String(value || ''));
+}
+
+function mergeActionResultsIntoJobs(jobs, results, providerLabel) {
+  const resultMap = new Map(
+    (Array.isArray(results) ? results : []).map((item) => [item.jobId, item]),
+  );
+
+  return jobs.map((job) => {
+    const result = resultMap.get(job.id);
+    if (!result) {
+      return {
+        ...job,
+        provider: providerLabel,
+        status: 'failed',
+        statusLabel: 'Không có phản hồi',
+        error: 'Không nhận được phản hồi trạng thái cho thao tác đã chọn.',
+      };
+    }
+
+    return {
+      ...job,
+      provider: result.provider || providerLabel,
+      status: result.status || (result.ok ? 'completed' : 'failed'),
+      statusLabel: result.statusLabel || (result.ok ? 'Đã hoàn thành' : 'Thất bại'),
+      error: result.error || '',
+      startedAt: result.startedAt || job.startedAt || new Date().toISOString(),
+      sentAt: result.sentAt || job.sentAt || null,
+      failedAt: result.failedAt || job.failedAt || null,
+      apiResult: result.apiResult || null,
+    };
+  });
+}
+
+function buildActionFailureMessage(jobs, fallbackMessage) {
+  const failedJobs = (Array.isArray(jobs) ? jobs : []).filter((job) => job.status === 'failed');
+  if (!failedJobs.length) return fallbackMessage;
+
+  const firstFailedJob = failedJobs[0];
+  const detail = String(firstFailedJob?.error || '').trim();
+  const label = String(firstFailedJob?.actionLabel || firstFailedJob?.statusLabel || 'Thao tác').trim();
+
+  if (detail) {
+    return `${label} thất bại: ${detail}`;
+  }
+
+  return fallbackMessage;
+}
+
+function mergeServiceResultsIntoJobs(jobs, results, providerLabel) {
+  const resultMap = new Map(
+    (Array.isArray(results) ? results : []).map((item) => [item.jobId, item]),
+  );
+
+  return jobs.map((job) => {
+    const result = resultMap.get(job.id);
+    if (!result) {
+      return {
+        ...job,
+        provider: providerLabel,
+        status: 'failed',
+        statusLabel: 'Không có phản hồi',
+        error: 'Không nhận được phản hồi trạng thái từ local service.',
+      };
+    }
+
+    return {
+      ...job,
+      provider: result.provider || providerLabel,
+      status: result.status || (result.ok ? 'sent' : 'failed'),
+      statusLabel: result.statusLabel || (result.ok ? 'Đã gửi' : 'Gửi thất bại'),
+      error: result.error || '',
+      startedAt: result.startedAt || job.startedAt || new Date().toISOString(),
+      sentAt: result.sentAt || job.sentAt || null,
+      failedAt: result.failedAt || job.failedAt || null,
+      apiResult: result.apiResult || null,
+    };
+  });
+}
+
+function applyOptimisticActionResults(account, jobs) {
+  if (!account) return null;
+
+  const successfulJobs = (Array.isArray(jobs) ? jobs : []).filter((job) => job.status !== 'failed');
+  if (!successfulJobs.length) return null;
+
+  const removedFriendIds = new Set(
+    successfulJobs
+      .filter((job) => job.actionType === 'remove_friend')
+      .map((job) => String(job.zid || '').trim())
+      .filter(Boolean),
+  );
+  const leftGroupIds = new Set(
+    successfulJobs
+      .filter((job) => job.actionType === 'leave_group')
+      .map((job) => String(job.zid || '').trim())
+      .filter(Boolean),
+  );
+  const undoneRequestIds = new Set(
+    successfulJobs
+      .filter((job) => job.actionType === 'undo_friend_request')
+      .map((job) => String(job.zid || '').trim())
+      .filter(Boolean),
+  );
+  const acceptedRequestJobs = successfulJobs.filter((job) => job.actionType === 'accept_friend_request');
+  const acceptedRequestIds = new Set(
+    acceptedRequestJobs
+      .map((job) => String(job.zid || '').trim())
+      .filter(Boolean),
+  );
+  const rejectedRequestIds = new Set(
+    successfulJobs
+      .filter((job) => job.actionType === 'reject_friend_request')
+      .map((job) => String(job.zid || '').trim())
+      .filter(Boolean),
+  );
+  const joinedGroupJobs = successfulJobs.filter((job) => (
+    job.actionType === 'join_group' && (job.status === 'completed' || job.status === 'skipped')
+  ));
+
+  const nextFriends = Array.isArray(account.friends) ? account.friends.filter((friend) => {
+    const friendId = String(friend?.userId || friend?.username || friend?.globalId || '').trim();
+    return !removedFriendIds.has(friendId);
+  }) : [];
+
+  acceptedRequestJobs.forEach((job) => {
+    if (nextFriends.some((friend) => String(friend?.userId || friend?.username || friend?.globalId || '').trim() === String(job.zid || '').trim())) {
+      return;
+    }
+    nextFriends.unshift({
+      userId: job.zid,
+      displayName: job.name,
+      avatar: job.avatar,
+      phoneNumber: job.phone && job.phone !== '—' ? job.phone : '',
+    });
+  });
+
+  const nextGroups = Array.isArray(account.groups) ? account.groups.filter((group) => {
+    const groupId = String(group?.userId || group?.globalId || '').trim().replace(/^g/i, '');
+    return !leftGroupIds.has(groupId);
+  }) : [];
+
+  joinedGroupJobs.forEach((job) => {
+    const normalizedGroupId = String(job.zid || '').trim().replace(/^g/i, '');
+    if (!normalizedGroupId) return;
+    if (nextGroups.some((group) => String(group?.userId || group?.globalId || '').trim().replace(/^g/i, '') === normalizedGroupId)) {
+      return;
+    }
+    nextGroups.unshift({
+      userId: normalizedGroupId,
+      displayName: job.name,
+      avatar: job.avatar,
+      totalMember: Number.parseInt(String(job.phone || '').replace(/\D+/g, ''), 10) || 0,
+      desc: job.classification || '',
+    });
+  });
+
+  const nextSentRequests = Array.isArray(account.sentFriendRequests) ? account.sentFriendRequests.filter((request) => {
+    const requestId = String(request?.userId || request?.zid || '').trim();
+    return !undoneRequestIds.has(requestId);
+  }) : [];
+
+  const nextReceivedRequests = Array.isArray(account.receivedFriendRequests) ? account.receivedFriendRequests.filter((request) => {
+    const requestId = String(request?.userId || request?.zid || '').trim();
+    return !acceptedRequestIds.has(requestId) && !rejectedRequestIds.has(requestId);
+  }) : [];
+
+  return {
+    friends: nextFriends,
+    groups: nextGroups,
+    sentFriendRequests: nextSentRequests,
+    receivedFriendRequests: nextReceivedRequests,
+    serviceSyncedAt: new Date().toISOString(),
+  };
+}
+
+function parseDelayWindowMs(delayWindow) {
+  const match = String(delayWindow || '').match(/(\d+)\s*-\s*(\d+)/);
+  if (!match) return 0;
+  const from = Number(match[1]);
+  const to = Number(match[2]);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  const min = Math.min(from, to);
+  const max = Math.max(from, to);
+  return (min + Math.floor(Math.random() * (max - min + 1))) * 1000;
+}
+
+function hideProcessedContactRows(account, jobs, enabled) {
+  if (!enabled || !account?.id) return;
+  const ids = (Array.isArray(jobs) ? jobs : [])
+    .filter((job) => job.status !== 'failed')
+    .map((job) => String(job.zid || '').trim())
+    .filter(Boolean);
+  if (!ids.length) return;
+  hideContactsForAccount(account.id, ids);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function mergeInviteResultsIntoJobs(jobs, results, providerLabel) {
+  const resultMap = new Map(
+    (Array.isArray(results) ? results : []).map((item) => [item.jobId, item]),
+  );
+
+  return jobs.map((job) => {
+    const result = resultMap.get(job.id);
+    if (!result) {
+      return {
+        ...job,
+        provider: providerLabel,
+        status: 'failed',
+        statusLabel: 'Không có phản hồi',
+        error: 'Không nhận được phản hồi trạng thái cho lời mời kết bạn.',
+      };
+    }
+
+    return {
+      ...job,
+      provider: result.provider || providerLabel,
+      status: result.status || (result.ok ? 'sent' : 'failed'),
+      statusLabel: result.statusLabel || (result.ok ? 'Đã gửi lời mời' : 'Kết bạn thất bại'),
+      error: result.error || '',
+      startedAt: result.startedAt || job.startedAt || new Date().toISOString(),
+      sentAt: result.sentAt || job.sentAt || null,
+      failedAt: result.failedAt || job.failedAt || null,
+      apiResult: result.apiResult || null,
+    };
+  });
+}
+
+async function runInviteJobsViaExtension(account, jobs) {
+  const results = [];
+
+  for (let index = 0; index < jobs.length; index += 1) {
+    const job = jobs[index];
+    const startedAt = new Date().toISOString();
+
+    try {
+      const apiResult = await sendFriendRequestRequest(account, job);
+      results.push({
+        jobId: job.id,
+        ok: true,
+        status: 'sent',
+        statusLabel: 'Đã gửi lời mời',
+        provider: 'extension',
+        apiResult,
+        startedAt,
+        sentAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      results.push({
+        jobId: job.id,
+        ok: false,
+        status: 'failed',
+        statusLabel: 'Kết bạn thất bại',
+        provider: 'extension',
+        error: error.message,
+        startedAt,
+        failedAt: new Date().toISOString(),
+      });
+    }
+
+    if (index < jobs.length - 1) {
+      const waitMs = parseDelayWindowMs(job.delayWindow);
+      if (waitMs > 0) {
+        await delay(waitMs);
+      }
+    }
+  }
+
+  return { results };
+}
+
+export default function LeftColumn({ selection, actionState, campaignState, onCampaignCommit }) {
+  const [ketBanEnabled, setKetBanEnabled] = useState(false);
+  const [nhanTinEnabled, setNhanTinEnabled] = useState(false);
+  const [friendRequest, setFriendRequest] = useState('');
+  const [message, setMessage] = useState('');
+  const [delayFrom, setDelayFrom] = useState('60');
+  const [delayTo, setDelayTo] = useState('60');
+  const [antiSpam, setAntiSpam] = useState(true);
+  const [showExtDialog, setShowExtDialog] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
+  const [extensionFallbackDialog, setExtensionFallbackDialog] = useState({ open: false, jobs: [], error: '', running: false });
+  const [localServiceReady, setLocalServiceReady] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [pullGroupFriendIds, setPullGroupFriendIds] = useState([]);
+  const [pullGroupSearchQuery, setPullGroupSearchQuery] = useState('');
+  const [feedback, setFeedback] = useState(null);
+
+  const {
+    activeAccount,
+    activeAccountReady,
+    activeAccountIndex,
+    extensionActive,
+    extensionChecked,
+    accounts,
+    cancelPendingSync,
+    confirmPendingSync,
+    syncing,
+    syncState,
+    waitingForLogin,
+    addAccount,
+    refreshAccount,
+    refreshActiveAccountFromService,
+    stopPolling,
+    updateAccountById,
+    setActiveAccountIndex,
+  } = useAccount();
+
+  const selectedItems = selection?.selectedItems || [];
+  const selectedCount = selectedItems.length;
+  const selectedLabel = selection?.activeLabel || 'Bạn bè';
+  const hasAccount = accounts.length > 0;
+  const activeTabActionKeys = getTabActionKeys(selection?.activeTab);
+  const enabledTabActionKeys = activeTabActionKeys.filter((key) => Boolean(actionState?.[key]));
+  const unsupportedActionLabels = getUnsupportedActionLabels(selection?.activeTab, actionState);
+  const hasSupportedActionSelected = enabledTabActionKeys.some((key) => SUPPORTED_REMOTE_ACTION_KEYS.has(key));
+  const removeFriendEnabled = selection?.activeTab === 0 && Boolean(actionState?.removeFriend);
+  const muteNotificationsEnabled = (selection?.activeTab === 0 || selection?.activeTab === 1) && Boolean(actionState?.muteNotifications);
+  const unmuteNotificationsEnabled = (selection?.activeTab === 0 || selection?.activeTab === 1) && Boolean(actionState?.unmuteNotifications);
+  const leaveGroupEnabled = selection?.activeTab === 1 && Boolean(actionState?.leaveGroup);
+  const pullGroupEnabled = selection?.activeTab === 1 && Boolean(actionState?.pullGroup);
+  const joinGroupEnabled = selection?.activeTab === 2 && Boolean(actionState?.joinGroup);
+  const undoFriendRequestEnabled = selection?.activeTab === 4 && Boolean(actionState?.undoFriendRequest);
+  const rejectFriendRequestEnabled = selection?.activeTab === 5 && Boolean(actionState?.rejectFriendRequest);
+  const acceptFriendRequestEnabled = selection?.activeTab === 5 && Boolean(actionState?.acceptFriendRequest);
+  const deletePhoneAfterActionEnabled = selection?.activeTab === 3 && Boolean(actionState?.deletePhoneAfterAction);
+  const canInviteFromCurrentTab = selection?.activeTab >= 0 && selection?.activeTab <= 3;
+  const canMessageFromCurrentTab = selection?.activeTab >= 0 && selection?.activeTab <= 3;
+  const canRemoveFriendFromCurrentTab = selection?.activeTab === 0 || selection?.activeTab === 3;
+  const canPullGroupFromCurrentTab = selection?.activeTab === 1;
+  const canNotificationFromCurrentTab = selection?.activeTab >= 0 && selection?.activeTab <= 3;
+  const activeAccountPrimary = getAccountPrimaryLabel(activeAccount, activeAccountIndex);
+  const activeAccountSecondary = getAccountSecondaryLabel(activeAccount);
+  const syncStatusLabel = activeAccountReady
+    ? 'Sẵn sàng'
+    : syncState.phase === 'awaiting_sync_confirmation'
+      ? 'Chờ xác nhận đồng bộ'
+      : syncState.phase === 'waiting_for_login'
+        ? 'Đang chờ đăng nhập'
+        : syncState.phase === 'syncing_account'
+          ? 'Đang đồng bộ'
+          : 'Chưa sẵn sàng';
+  const syncStatusColor = activeAccountReady
+    ? 'success'
+    : syncState.phase === 'awaiting_sync_confirmation'
+      ? 'warning'
+      : syncState.phase === 'waiting_for_login' || syncState.phase === 'syncing_account'
+        ? 'info'
+        : 'default';
+  const availablePullGroupFriends = useMemo(() => (
+    (Array.isArray(activeAccount?.friends) ? activeAccount.friends : []).map(normalizeFriendRow)
+  ), [activeAccount?.friends]);
+  const filteredPullGroupFriends = useMemo(() => {
+    const query = String(pullGroupSearchQuery || '').trim().toLowerCase();
+    if (!query) return availablePullGroupFriends;
+    return availablePullGroupFriends.filter((friend) => (
+      String(friend.name || '').toLowerCase().includes(query)
+      || String(friend.phone || '').toLowerCase().includes(query)
+      || String(friend.zid || '').toLowerCase().includes(query)
+      || String(friend.classification || '').toLowerCase().includes(query)
+    ));
+  }, [availablePullGroupFriends, pullGroupSearchQuery]);
+  const selectedPullGroupFriends = useMemo(() => (
+    availablePullGroupFriends.filter((friend) => pullGroupFriendIds.includes(String(friend.zid || '')))
+  ), [availablePullGroupFriends, pullGroupFriendIds]);
+  const selectedGroupRowForPull = selection?.activeTab === 1 && selectedItems.length === 1 ? selectedItems[0] : null;
+  const isPullGroupMode = pullGroupEnabled && selection?.activeTab === 1;
+  const visiblePullGroupFriendIds = filteredPullGroupFriends.map((friend) => String(friend.zid || '')).filter(Boolean);
+  const allPullGroupVisibleSelected = visiblePullGroupFriendIds.length > 0 && visiblePullGroupFriendIds.every((id) => pullGroupFriendIds.includes(id));
+
+  useEffect(() => {
+    const validIds = new Set(availablePullGroupFriends.map((friend) => String(friend.zid || '')));
+    setPullGroupFriendIds((prev) => prev.filter((id) => validIds.has(String(id || ''))));
+  }, [availablePullGroupFriends]);
+
+  useEffect(() => {
+    if (!isPullGroupMode) {
+      setPullGroupSearchQuery('');
+    }
+  }, [isPullGroupMode]);
+
+  const togglePullGroupFriend = (friendId) => {
+    const normalizedId = String(friendId || '');
+    if (!normalizedId) return;
+    setPullGroupFriendIds((prev) => (
+      prev.includes(normalizedId)
+        ? prev.filter((id) => id !== normalizedId)
+        : [...prev, normalizedId]
+    ));
+  };
+
+  const toggleAllPullGroupFriends = (checked) => {
+    if (!checked) {
+      setPullGroupFriendIds((prev) => prev.filter((id) => !visiblePullGroupFriendIds.includes(id)));
+      return;
+    }
+
+    setPullGroupFriendIds((prev) => Array.from(new Set([...prev, ...visiblePullGroupFriendIds])));
+  };
+
+  const recentActivities = useMemo(() => {
+    const actionJobs = (campaignState?.actionJobs || []).map((item) => ({
+      ...item,
+      activityType: 'action',
+      timestamp: item.createdAt || item.scheduledAt,
+    }));
+    const inviteJobs = (campaignState?.inviteJobs || []).map((item) => ({
+      ...item,
+      activityType: 'invite',
+      timestamp: item.createdAt || item.scheduledAt,
+    }));
+    const messageJobs = (campaignState?.messageJobs || []).map((item) => ({
+      ...item,
+      activityType: 'message',
+      timestamp: item.createdAt || item.scheduledAt,
+    }));
+    const scheduledJobs = (campaignState?.scheduledJobs || []).map((item) => ({
+      ...item,
+      activityType: 'scheduled',
+      timestamp: item.scheduledAt || item.createdAt,
+    }));
+
+    return [...actionJobs, ...inviteJobs, ...messageJobs, ...scheduledJobs]
+      .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+      .slice(0, 6);
+  }, [campaignState]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const probe = async () => {
+      const ok = await checkLocalZaloService();
+      if (!cancelled) {
+        setLocalServiceReady(ok);
+      }
+    };
+
+    probe();
+    const intervalId = setInterval(probe, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!syncState?.error) return;
+    if (syncState.phase !== 'failed' && syncState.phase !== 'cancelled') return;
+    setFeedback({
+      severity: syncState.phase === 'failed' ? 'error' : 'info',
+      message: syncState.error,
+    });
+  }, [syncState.error, syncState.phase]);
+
+  useEffect(() => {
+    if (!extensionActive) return;
+    if (!isExtensionInvalidationError(feedback?.message)) return;
+    setFeedback(null);
+  }, [extensionActive, feedback]);
+
+  const handleAddAccount = async () => {
+    if (!extensionChecked) return;
+    if (!extensionActive) {
+      setShowExtDialog(true);
+      return;
+    }
+
+    const result = await addAccount();
+    if (!result.success && result.error === 'extension_not_found') {
+      setShowExtDialog(true);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    setSelectedFiles(Array.from(event.target.files || []));
+  };
+
+  const handleRefreshAccount = async () => {
+    if (!hasAccount || syncing) return;
+
+    try {
+      const servicePatch = await refreshActiveAccountFromService();
+      if (servicePatch) {
+        setFeedback({ severity: 'success', message: 'Đã làm mới dữ liệu tài khoản từ local service.' });
+        return;
+      }
+    } catch (_) {
+      // Fall back to the extension-based refresh flow below.
+    }
+
+    refreshAccount();
+  };
+
+  const handleConfirmPendingSync = async () => {
+    const result = await confirmPendingSync();
+    if (!result?.ok) {
+      setFeedback({ severity: 'error', message: result?.error || 'Không xác nhận được đồng bộ tài khoản.' });
+    }
+  };
+
+  const handleCancelPendingSync = async () => {
+    const result = await cancelPendingSync('Người dùng đã hủy đồng bộ tài khoản.');
+    if (!result?.ok) {
+      setFeedback({ severity: 'error', message: result?.error || 'Không hủy được đồng bộ tài khoản.' });
+    }
+  };
+
+  const openRewriteDialog = (target) => {
+    const sourceText = target === 'friend' ? friendRequest : message;
+    const options = buildRewriteOptions(sourceText);
+    if (!options.length) {
+      setFeedback({ severity: 'warning', message: 'Cần nhập nội dung trước khi viết lại.' });
+      return;
+    }
+    setRewriteDialog({ open: true, target, options });
+  };
+
+  const applyRewriteOption = (value) => {
+    if (rewriteDialog.target === 'friend') {
+      setFriendRequest(value.slice(0, 150));
+    } else {
+      setMessage(value);
+    }
+    setRewriteDialog({ open: false, target: 'message', options: [] });
+  };
+
+  const handleConfirmExtensionFallback = async () => {
+    const pendingJobs = Array.isArray(extensionFallbackDialog.jobs) ? extensionFallbackDialog.jobs : [];
+    if (!pendingJobs.length) {
+      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
+      return;
+    }
+
+    setExtensionFallbackDialog((prev) => ({ ...prev, running: true }));
+
+    try {
+      if (!activeAccountReady) {
+        throw new Error('Tài khoản chưa hoàn tất đồng bộ với extension. Hãy làm mới tài khoản và xác nhận đồng bộ trước khi gửi tin.');
+      }
+
+      const response = await executeMessageJobs({
+        account: activeAccount,
+        jobs: pendingJobs,
+      });
+
+      if (!response?.ok) {
+        throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên tab Zalo.');
+      }
+
+      const acceptedCount = Number(response.accepted || pendingJobs.length) || pendingJobs.length;
+      setFeedback({
+        severity: 'info',
+        message: `Extension đã nhận ${acceptedCount}/${pendingJobs.length} tin nhắn và đang gửi trên tab Zalo thật. Trạng thái sẽ cập nhật tự động bên phải.`,
+      });
+      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
+    } catch (error) {
+      onCampaignCommit?.({
+        messageJobs: pendingJobs.map((job) => ({
+          ...job,
+          status: 'failed',
+          statusLabel: 'Không thể kết nối extension',
+          error: error.message,
+        })),
+      });
+
+      setFeedback({
+        severity: 'error',
+        message: error.message,
+      });
+      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
+    }
+  };
+
+  const handleStart = async () => {
+    if (!hasAccount) {
+      setFeedback({ severity: 'warning', message: 'Bạn cần thêm tài khoản Zalo trước khi chạy.' });
+      return;
+    }
+
+    if (!activeAccount) {
+      setFeedback({ severity: 'warning', message: 'Hãy chọn một tài khoản Zalo hợp lệ trước khi chạy.' });
+      return;
+    }
+
+    if (!activeAccountReady) {
+      setFeedback({
+        severity: 'warning',
+        message: syncState.phase === 'awaiting_sync_confirmation'
+          ? 'Tài khoản đang chờ bạn xác nhận đồng bộ. Hãy xác nhận trước khi chạy.'
+          : 'Tài khoản chưa sẵn sàng để chạy. Hãy làm mới và hoàn tất đồng bộ tài khoản Zalo trước.',
+      });
+      return;
+    }
+
+    if (!selectedCount) {
+      setFeedback({ severity: 'warning', message: 'Hãy chọn ít nhất một dòng dữ liệu ở cột bên phải.' });
+      return;
+    }
+
+    if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && unsupportedActionLabels.length === 0) {
+      setFeedback({ severity: 'warning', message: 'Hãy bật ít nhất một hành động trước khi chạy.' });
+      return;
+    }
+
+    if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && unsupportedActionLabels.length > 0) {
+      setFeedback({
+        severity: 'warning',
+        message: `Các chức năng ${unsupportedActionLabels.join(', ')} đã hiện đúng theo tab nhưng chưa được nối vào local service/extension để chạy thật.`,
+      });
+      return;
+    }
+
+    if (muteNotificationsEnabled && unmuteNotificationsEnabled) {
+      setFeedback({ severity: 'warning', message: 'Chỉ chọn một trong hai thao tác: Bật thông báo hoặc Tắt thông báo.' });
+      return;
+    }
+
+    if (ketBanEnabled && !canInviteFromCurrentTab) {
+      setFeedback({ severity: 'warning', message: 'Kết bạn hiện áp dụng cho tab Bạn bè, Nhóm, Thư viện nhóm hoặc SĐT/ZID.' });
+      return;
+    }
+
+    if (removeFriendEnabled && !canRemoveFriendFromCurrentTab) {
+      setFeedback({ severity: 'warning', message: 'Xóa bạn bè hiện chỉ áp dụng cho tab Bạn bè hoặc SĐT/ZID.' });
+      return;
+    }
+
+    if (pullGroupEnabled && !canPullGroupFromCurrentTab) {
+      setFeedback({ severity: 'warning', message: 'Kéo nhóm hiện chỉ áp dụng ở tab Nhóm.' });
+      return;
+    }
+
+    if (pullGroupEnabled && selection?.activeTab === 1 && selectedItems.length !== 1) {
+      setFeedback({ severity: 'warning', message: 'Ở tab Nhóm, hãy chọn đúng 1 nhóm đích để kéo thành viên vào.' });
+      return;
+    }
+
+    if (pullGroupEnabled && selection?.activeTab === 1 && selectedPullGroupFriends.length === 0) {
+      setFeedback({ severity: 'warning', message: 'Hãy chọn ít nhất 1 bạn bè ở cột trái để mời vào nhóm đã chọn.' });
+      return;
+    }
+
+    if (nhanTinEnabled && !canMessageFromCurrentTab) {
+      setFeedback({ severity: 'warning', message: 'Nhắn tin hiện chỉ áp dụng cho tab Bạn bè, Nhóm, Thư viện nhóm hoặc SĐT/ZID.' });
+      return;
+    }
+
+    if ((muteNotificationsEnabled || unmuteNotificationsEnabled) && !canNotificationFromCurrentTab) {
+      setFeedback({ severity: 'warning', message: 'Bật/Tắt thông báo hiện chỉ áp dụng cho tab Bạn bè, Nhóm, Thư viện nhóm hoặc SĐT/ZID.' });
+      return;
+    }
+
+    if (nhanTinEnabled && !message.trim() && selectedFiles.length === 0) {
+      setFeedback({ severity: 'warning', message: 'Nhắn tin cần có nội dung hoặc ít nhất một tệp đính kèm.' });
+      return;
+    }
+
+    const now = new Date();
+    const scheduledDate = scheduleAt ? new Date(scheduleAt) : null;
+    const isScheduled = Boolean(scheduledDate && scheduledDate.getTime() > now.getTime());
+    const delayWindow = `${delayFrom}-${delayTo}s`;
+    const messageTargetsAreGroups = selection?.activeTab === 1 || selection?.activeTab === 2;
+    const inviteResolution = ketBanEnabled
+      ? await resolveInviteTargets({
+          selectedItems,
+          activeTab: selection?.activeTab,
+          activeAccount,
+        })
+      : { targets: [], totals: null, summaries: [] };
+    const inviteTargets = inviteResolution.targets || [];
+
+    if (!isScheduled && nhanTinEnabled && selectedFiles.length > 0) {
+      setFeedback({ severity: 'warning', message: 'Tự động nhắn tin hiện mới hỗ trợ nội dung chữ. File đính kèm chưa được thực thi thật.' });
+      return;
+    }
+
+    if (ketBanEnabled && inviteTargets.length === 0) {
+      const summary = inviteResolution?.totals;
+      setFeedback({
+        severity: 'warning',
+        message: messageTargetsAreGroups
+          ? summary
+            ? `Nhóm đang xét có ${summary.totalMembers} thành viên, ${summary.friendCount} đã là bạn, ${summary.incomingRequestCount} đã gửi lời mời cho bạn, ${summary.outgoingRequestCount} bạn đã gửi lời mời trước đó, ${summary.inviteableCount} người chưa kết bạn.`
+            : 'Không tìm thấy thành viên nào trong nhóm cần gửi kết bạn. Có thể tất cả đã là bạn bè hoặc nhóm chưa có dữ liệu thành viên.'
+          : 'Không có đối tượng hợp lệ để gửi lời mời kết bạn.',
+      });
+      return;
+    }
+
+    const inviteRecords = ketBanEnabled
+      ? buildInviteRecords({
+          inviteTargets,
+          friendRequest,
+          activeAccount,
+          activeAccountIndex,
+          accountLabel: activeAccountPrimary,
+          delayWindow,
+          antiSpam,
+          selectedLabel,
+          messageTargetsAreGroups,
+          isScheduled,
+          scheduledDate,
+          now,
+        })
+      : [];
+
+    const messageRecords = nhanTinEnabled
+      ? buildMessageRecords({
+          selectedItems,
+          message,
+          selectedFiles,
+          activeAccount,
+          activeAccountIndex,
+          accountLabel: activeAccountPrimary,
+          delayWindow,
+          antiSpam,
+          selectedLabel,
+          messageTargetsAreGroups,
+          isScheduled,
+          scheduledDate,
+          now,
+        })
+      : [];
+
+    const actionRecords = buildActionRecords({
+      selectedItems,
+      pullGroupItems: selectedPullGroupFriends,
+      removeFriendEnabled,
+      muteNotificationsEnabled,
+      unmuteNotificationsEnabled,
+      leaveGroupEnabled,
+      pullGroupEnabled,
+      joinGroupEnabled,
+      targetGroupId: selectedGroupRowForPull?.zid || selectedGroupRowForPull?.key || '',
+      targetGroupName: selectedGroupRowForPull?.name || 'Nhóm đã chọn',
+      undoFriendRequestEnabled,
+      rejectFriendRequestEnabled,
+      acceptFriendRequestEnabled,
+      activeAccount,
+      activeAccountIndex,
+      accountLabel: activeAccountPrimary,
+      delayWindow,
+      antiSpam,
+      selectedLabel,
+      messageTargetsAreGroups,
+      isScheduled,
+      scheduledDate,
+      now,
+    });
+
+    const scheduledRecords = isScheduled
+      ? [...actionRecords, ...inviteRecords, ...messageRecords]
+      : [];
+
+    onCampaignCommit?.({
+      actionJobs: isScheduled ? [] : actionRecords,
+      inviteJobs: isScheduled ? [] : inviteRecords,
+      messageJobs: isScheduled ? [] : messageRecords,
+      scheduledJobs: scheduledRecords,
+    });
+
+    if (isScheduled) {
+      setFeedback({
+        severity: 'success',
+        message: `Đã lên lịch ${actionRecords.length + inviteRecords.length + messageRecords.length} thao tác cho tab ${selectedLabel}.`,
+      });
+    } else if (messageRecords.length > 0 && inviteRecords.length > 0) {
+      setFeedback({
+        severity: 'info',
+        message: `Đang chuẩn bị chạy ${inviteRecords.length} lời mời kết bạn và ${messageRecords.length} tin nhắn.`,
+      });
+    } else if (inviteRecords.length > 0 && messageTargetsAreGroups && inviteResolution?.totals) {
+      const summary = inviteResolution.totals;
+      setFeedback({
+        severity: 'info',
+        message: `Nhóm đang xét có ${summary.totalMembers} thành viên, ${summary.friendCount} đã là bạn, ${summary.incomingRequestCount} đã gửi lời mời cho bạn, ${summary.outgoingRequestCount} bạn đã gửi lời mời trước đó. Đang gửi ${inviteRecords.length} lời mời kết bạn qua local service...`,
+      });
+    } else if (actionRecords.length > 0) {
+      setFeedback({
+        severity: 'info',
+        message: `Đang chuẩn bị chạy ${actionRecords.length} thao tác từ cột phải.`,
+      });
+    } else if (messageRecords.length > 0) {
+      setFeedback({
+        severity: 'info',
+        message: `Đang chuẩn bị gửi ${messageRecords.length} tin nhắn qua tab Zalo thật.`,
+      });
+    } else {
+      setFeedback({
+        severity: 'success',
+        message: `Đã tạo ${inviteRecords.length} thao tác cho tab ${selectedLabel}.`,
+      });
+    }
+
+    if (!isScheduled) {
+      setScheduleAt('');
+    }
+
+    let inviteSummary = null;
+    let messageSummary = null;
+    let actionSummary = null;
+
+    if (!isScheduled && actionRecords.length > 0) {
+      let resolvedActionJobs = [];
+
+      try {
+        setFeedback({
+          severity: 'info',
+          message: `Đang chạy ${actionRecords.length} thao tác qua local service...`,
+        });
+
+        const response = await runAccountActionJobsViaLocalService({
+          account: {
+            ...activeAccount,
+            userAgent: activeAccount?.userAgent || navigator.userAgent,
+          },
+          jobs: actionRecords,
+          userAgent: activeAccount?.userAgent || navigator.userAgent,
+        });
+
+        resolvedActionJobs = mergeActionResultsIntoJobs(actionRecords, response?.results, 'local-service');
+
+        hideProcessedContactRows(activeAccount, resolvedActionJobs, deletePhoneAfterActionEnabled);
+
+        onCampaignCommit?.({
+          actionJobs: resolvedActionJobs,
+        });
+
+        const successCount = resolvedActionJobs.filter((job) => job.status !== 'failed').length;
+        const failedCount = resolvedActionJobs.length - successCount;
+
+        if (successCount > 0 && failedCount === 0) {
+          actionSummary = {
+            severity: 'success',
+            message: `Đã chạy ${successCount}/${resolvedActionJobs.length} thao tác thành công.`,
+          };
+        } else if (successCount > 0) {
+          actionSummary = {
+            severity: 'warning',
+            message: `Đã chạy thành công ${successCount}/${resolvedActionJobs.length} thao tác. ${failedCount} thao tác còn lại bị lỗi.`,
+          };
+        } else {
+          throw new Error(buildActionFailureMessage(
+            resolvedActionJobs,
+            response?.error || 'Không thực thi được thao tác nào từ cột phải.',
+          ));
+        }
+
+        if (resolvedActionJobs.some((job) => job.status !== 'failed')) {
+          const optimisticPatch = applyOptimisticActionResults(activeAccount, resolvedActionJobs);
+          if (optimisticPatch && activeAccount?.id) {
+            updateAccountById(activeAccount.id, optimisticPatch);
+          }
+
+          try {
+            await refreshActiveAccountFromService();
+          } catch (_) {
+            // Keep the completed action state even if a follow-up refresh is temporarily unavailable.
+          }
+        }
+      } catch (error) {
+        const failedActionJobs = actionRecords.map((job) => ({
+          ...job,
+          status: 'failed',
+          statusLabel: 'Thao tác thất bại',
+          error: error.message,
+          provider: 'local-service',
+        }));
+
+        onCampaignCommit?.({
+          actionJobs: failedActionJobs,
+        });
+
+        actionSummary = {
+          severity: 'error',
+          message: error.message,
+        };
+      }
+    }
+
+    if (!isScheduled && inviteRecords.length > 0) {
+      let resolvedInviteJobs = [];
+
+      try {
+        if (!(messageTargetsAreGroups && inviteResolution?.totals)) {
+          setFeedback({
+            severity: 'info',
+            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua local service...`,
+          });
+        }
+
+        const response = await sendFriendRequestJobsViaLocalService({
+          account: {
+            ...activeAccount,
+            userAgent: activeAccount?.userAgent || navigator.userAgent,
+          },
+          jobs: inviteRecords,
+          userAgent: activeAccount?.userAgent || navigator.userAgent,
+        });
+
+        resolvedInviteJobs = mergeInviteResultsIntoJobs(
+          inviteRecords,
+          response?.results,
+          'local-service',
+        );
+
+        hideProcessedContactRows(activeAccount, resolvedInviteJobs, deletePhoneAfterActionEnabled);
+
+        onCampaignCommit?.({
+          inviteJobs: resolvedInviteJobs,
+        });
+
+        const processedCount = resolvedInviteJobs.filter((job) => job.status !== 'failed').length;
+        const failedCount = resolvedInviteJobs.length - processedCount;
+
+        if (processedCount > 0 && failedCount === 0) {
+          inviteSummary = {
+            severity: 'success',
+            message: `Đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn qua local service.`,
+          };
+        } else if (processedCount > 0) {
+          inviteSummary = {
+            severity: 'warning',
+            message: `Local service xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
+          };
+        } else {
+          throw new Error(response?.error || 'Local service không xử lý được lời mời kết bạn nào.');
+        }
+      } catch (serviceError) {
+        if (!extensionActive) {
+          const failedInviteJobs = inviteRecords.map((job) => ({
+            ...job,
+            status: 'failed',
+            statusLabel: 'Không có local service',
+            error: serviceError.message,
+            provider: 'local-service',
+          }));
+
+          onCampaignCommit?.({
+            inviteJobs: failedInviteJobs,
+          });
+
+          inviteSummary = {
+            severity: 'error',
+            message: serviceError.message,
+          };
+        } else {
+          setFeedback({
+            severity: 'warning',
+            message: `Local service lỗi, đang chuyển sang extension để kết bạn: ${serviceError.message}`,
+          });
+
+          try {
+            const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
+            resolvedInviteJobs = mergeInviteResultsIntoJobs(
+              inviteRecords,
+              response?.results,
+              'extension',
+            );
+
+            hideProcessedContactRows(activeAccount, resolvedInviteJobs, deletePhoneAfterActionEnabled);
+
+            onCampaignCommit?.({
+              inviteJobs: resolvedInviteJobs,
+            });
+
+            const processedCount = resolvedInviteJobs.filter((job) => job.status !== 'failed').length;
+            const failedCount = resolvedInviteJobs.length - processedCount;
+
+            if (processedCount > 0 && failedCount === 0) {
+              inviteSummary = {
+                severity: 'success',
+                message: `Extension đã xử lý ${processedCount}/${resolvedInviteJobs.length} lời mời kết bạn thành công.`,
+              };
+            } else if (processedCount > 0) {
+              inviteSummary = {
+                severity: 'warning',
+                message: `Extension xử lý thành công ${processedCount}/${resolvedInviteJobs.length} lời mời. ${failedCount} lời mời còn lại bị lỗi.`,
+              };
+            } else {
+              throw new Error('Extension không xử lý được lời mời kết bạn nào.');
+            }
+          } catch (error) {
+            onCampaignCommit?.({
+              inviteJobs: inviteRecords.map((job) => ({
+                ...job,
+                status: 'failed',
+                statusLabel: 'Không thể kết nối extension',
+                error: error.message,
+                provider: 'extension',
+              })),
+            });
+
+            inviteSummary = {
+              severity: 'error',
+              message: error.message,
+            };
+          }
+        }
+      }
+
+      const optimisticSentRequests = resolvedInviteJobs
+        .filter((job) => job.status === 'sent')
+        .map((job) => ({
+          userId: job.zid,
+          displayName: job.name,
+          avatar: job.avatar,
+          message: job.note,
+          requestedAt: job.sentAt || new Date().toISOString(),
+        }));
+
+      if (optimisticSentRequests.length > 0 && activeAccount?.id) {
+        const requestMap = new Map(
+          [
+            ...optimisticSentRequests,
+            ...(Array.isArray(activeAccount?.sentFriendRequests) ? activeAccount.sentFriendRequests : []),
+          ].map((item) => [item.userId, item]),
+        );
+
+        updateAccountById(activeAccount.id, {
+          sentFriendRequests: Array.from(requestMap.values()),
+          serviceSyncedAt: new Date().toISOString(),
+        });
+      }
+
+      if (resolvedInviteJobs.some((job) => job.status !== 'failed')) {
+        try {
+          await refreshActiveAccountFromService();
+        } catch (_) {
+          // Keep optimistic invite state if service refresh is temporarily unavailable.
+        }
+      }
+    }
+
+    if (!isScheduled && messageRecords.length > 0) {
+      try {
+        setFeedback({
+          severity: 'info',
+          message: `Đang gửi ${messageRecords.length} tin nhắn qua local service...`,
+        });
+
+        const response = await sendMessageJobsViaLocalService({
+          account: {
+            ...activeAccount,
+            userAgent: activeAccount?.userAgent || navigator.userAgent,
+          },
+          jobs: messageRecords,
+          userAgent: activeAccount?.userAgent || navigator.userAgent,
+        });
+
+        const resolvedJobs = mergeServiceResultsIntoJobs(
+          messageRecords,
+          response?.results,
+          'local-service',
+        );
+
+        hideProcessedContactRows(activeAccount, resolvedJobs, deletePhoneAfterActionEnabled);
+
+        onCampaignCommit?.({
+          messageJobs: resolvedJobs,
+        });
+
+        const sentCount = resolvedJobs.filter((job) => job.status === 'sent').length;
+        const failedCount = resolvedJobs.length - sentCount;
+
+        if (sentCount > 0 && failedCount === 0) {
+          messageSummary = {
+            severity: 'success',
+            message: `Local service đã gửi ${sentCount}/${resolvedJobs.length} tin nhắn thành công.`,
+          };
+        } else if (sentCount > 0) {
+          messageSummary = {
+            severity: 'warning',
+            message: `Local service gửi thành công ${sentCount}/${resolvedJobs.length} tin nhắn. ${failedCount} tin còn lại bị lỗi.`,
+          };
+        } else {
+          throw new Error(response?.error || 'Local service không gửi được tin nhắn nào.');
+        }
+      } catch (serviceError) {
+        if (!extensionActive) {
+          onCampaignCommit?.({
+            messageJobs: messageRecords.map((job) => ({
+              ...job,
+              status: 'failed',
+              statusLabel: 'Không có local service',
+              error: serviceError.message,
+              provider: 'local-service',
+            })),
+          });
+
+          messageSummary = {
+            severity: 'error',
+            message: serviceError.message,
+          };
+        } else {
+          setExtensionFallbackDialog({
+            open: true,
+            jobs: messageRecords,
+            error: serviceError.message,
+            running: false,
+          });
+
+          messageSummary = {
+            severity: 'warning',
+            message: `Local service đang không phản hồi. Nếu tiếp tục, hệ thống sẽ mở tab Zalo thật qua extension để gửi ${messageRecords.length} tin nhắn.`,
+          };
+        }
+      }
+    }
+
+    const summaries = [actionSummary, inviteSummary, messageSummary].filter(Boolean);
+    if (summaries.length > 0) {
+      const severityWeight = { info: 1, success: 2, warning: 3, error: 4 };
+      const finalSeverity = summaries.reduce((highest, current) => (
+        severityWeight[current.severity] > severityWeight[highest] ? current.severity : highest
+      ), 'info');
+
+      setFeedback({
+        severity: finalSeverity,
+        message: summaries.map((item) => item.message).join(' '),
+      });
+    }
+  };
+
+  return (
+    <Box>
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Tài khoản:
+          </Typography>
+          <IconButton size="small" onClick={handleAddAccount} disabled={syncing}>
+            {syncing ? <CircularProgress size={16} /> : <AddIcon fontSize="small" />}
+          </IconButton>
+          <IconButton size="small" onClick={handleRefreshAccount} disabled={syncing || accounts.length === 0} title="Làm mới dữ liệu">
+            <RefreshIcon fontSize="small" />
+          </IconButton>
+          <IconButton size="small">
+            <SettingsIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        {accounts.length > 0 && (
+          <Select
+            size="small"
+            value={activeAccountIndex}
+            onChange={(event) => setActiveAccountIndex(Number(event.target.value))}
+            sx={{ mb: 1, minWidth: 220 }}
+            displayEmpty
+            renderValue={(value) => {
+              const selectedAccount = accounts[Number(value)];
+              if (!selectedAccount) return 'Chọn tài khoản';
+
+              return (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                  <Avatar src={selectedAccount.avatar} sx={{ width: 24, height: 24 }}>
+                    {getAccountPrimaryLabel(selectedAccount, value)?.[0] || 'Z'}
+                  </Avatar>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" fontWeight={600} noWrap>
+                      {getAccountPrimaryLabel(selectedAccount, value)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {getAccountSecondaryLabel(selectedAccount) || 'Đã đồng bộ tài khoản'}
+                    </Typography>
+                  </Box>
+                </Box>
+              );
+            }}
+          >
+            {accounts.map((acc, idx) => (
+              <MenuItem key={idx} value={idx}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                  <Avatar src={acc.avatar} sx={{ width: 24, height: 24 }}>
+                    {getAccountPrimaryLabel(acc, idx)?.[0] || 'Z'}
+                  </Avatar>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" fontWeight={600} noWrap>
+                      {getAccountPrimaryLabel(acc, idx)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {getAccountSecondaryLabel(acc) || `Tài khoản #${idx + 1}`}
+                    </Typography>
+                  </Box>
+                </Box>
+              </MenuItem>
+            ))}
+          </Select>
+        )}
+
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#fff', borderStyle: 'dashed' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1 }}>
+            <Avatar src={activeAccount?.avatar} sx={{ width: 42, height: 42 }}>
+              {activeAccountPrimary?.[0] || 'Z'}
+            </Avatar>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" fontWeight={700} noWrap>
+                {activeAccountPrimary}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {activeAccountSecondary || 'Đang chờ đồng bộ tên và ảnh đại diện'}
+              </Typography>
+            </Box>
+            <Chip label={syncStatusLabel} size="small" color={syncStatusColor} variant={activeAccountReady ? 'filled' : 'outlined'} />
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Đã đăng: {activeAccountPrimary}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {activeAccountSecondary || 'Chưa có thông tin số điện thoại hoặc ZID'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Bạn bè: {activeAccount?.friends?.length || 0} | Nhóm: {activeAccount?.groups?.length || 0}
+          </Typography>
+          <Typography variant="body2" color={localServiceReady === false ? 'error.main' : 'text.secondary'}>
+            Local service: {localServiceReady == null ? 'Đang kiểm tra...' : localServiceReady ? 'Sẵn sàng gửi qua request nội bộ' : 'Không kết nối được, sẽ cần extension nếu tiếp tục'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Đang chọn: {selectedCount}/{selection?.allItems?.length || 0} mục từ tab {selectedLabel}
+          </Typography>
+        </Paper>
+      </Box>
+
+      {feedback && (
+        <Alert severity={feedback.severity} sx={{ mb: 2 }} onClose={() => setFeedback(null)}>
+          {feedback.message}
+        </Alert>
+      )}
+
+      <Dialog open={showExtDialog} onClose={() => setShowExtDialog(false)} maxWidth="sm">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          Cần cài đặt Extension
+          <IconButton size="small" onClick={() => setShowExtDialog(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Bạn cần cài đặt extension "AutoZalo Bridge" để sử dụng tính năng này.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            Extension giúp mở cửa sổ ẩn danh, lấy cookie đúng phiên đăng nhập và đồng bộ dữ liệu Zalo về web app.
+          </Typography>
+          <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
+            Hướng dẫn cài đặt:
+          </Typography>
+          <Typography variant="body2" component="div">
+            1. Mở Chrome, vào <b>chrome://extensions</b><br />
+            2. Bật <b>"Chế độ nhà phát triển"</b> (góc phải trên)<br />
+            3. Nhấn <b>"Tải tiện ích đã giải nén"</b><br />
+            4. Chọn thư mục <b>extension</b><br />
+            5. Bật <b>"Cho phép trong cửa sổ ẩn danh"</b><br />
+            6. Tải lại trang web này
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExtDialog(false)}>Đóng</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={waitingForLogin} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {syncState.phase === 'awaiting_sync_confirmation'
+            ? 'Xác nhận đồng bộ tài khoản'
+            : syncState.phase === 'syncing_account'
+              ? 'Đang đồng bộ tài khoản'
+              : 'Đang chờ đăng nhập Zalo'}
+          <IconButton size="small" onClick={stopPolling}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {syncState.phase === 'awaiting_sync_confirmation' ? (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Extension đã lấy được phiên đăng nhập Zalo. Xác nhận để web app nhận và sử dụng tài khoản này.
+              </Alert>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                Tài khoản: <strong>{syncState.summary?.name || 'Tài khoản Zalo'}</strong>
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                Bạn bè: {syncState.summary?.friendCount || 0} | Nhóm: {syncState.summary?.groupCount || 0}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Nếu đồng ý, tài khoản sẽ được đồng bộ vào web app và dùng làm phiên thao tác cho các chức năng nhắn tin, quản lý hội thoại và action runtime.
+              </Typography>
+            </>
+          ) : syncState.phase === 'syncing_account' ? (
+            <Alert severity="info" icon={<CircularProgress size={20} />} sx={{ mb: 2 }}>
+              Đang chốt đồng bộ tài khoản và cập nhật dữ liệu phiên làm việc.
+            </Alert>
+          ) : (
+            <>
+              <Alert severity="info" icon={<CircularProgress size={20} />} sx={{ mb: 2 }}>
+                Vui lòng đăng nhập Zalo trong cửa sổ ẩn danh vừa mở.
+              </Alert>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                Sau khi đăng nhập thành công, extension sẽ lấy session và chuyển sang bước xác nhận đồng bộ.
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Thời gian chờ tối đa: 2 phút
+              </Typography>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {syncState.phase === 'awaiting_sync_confirmation' ? (
+            <>
+              <Button onClick={handleCancelPendingSync} color="inherit">Hủy</Button>
+              <Button onClick={handleConfirmPendingSync} variant="contained">Xác nhận đồng bộ</Button>
+            </>
+          ) : (
+            <Button onClick={stopPolling} color="error" disabled={syncState.phase === 'syncing_account'}>Hủy</Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={extensionFallbackDialog.open}
+        onClose={() => {
+          if (extensionFallbackDialog.running) return;
+          setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Local service không sẵn sàng</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Không gửi được qua local service nên nếu tiếp tục, ứng dụng sẽ mở tab Zalo thật để nhờ extension gửi tin.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            Lỗi local service: {extensionFallbackDialog.error || 'Không rõ nguyên nhân.'}
+          </Typography>
+          {(extensionFallbackDialog.error || '').includes('hết hạn') && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              Cookie Zalo đã hết hạn. Hãy bấm <strong>Hủy</strong>, sau đó bấm nút <strong>Làm mới</strong> tài khoản (đăng nhập lại qua extension) để lấy phiên mới.
+            </Alert>
+          )}
+          <Typography variant="body2" color="text.secondary">
+            Nếu bạn không muốn bật tab Zalo, hãy bấm Hủy rồi kiểm tra lại local service ở cổng 4517.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false })}
+            disabled={extensionFallbackDialog.running}
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleConfirmExtensionFallback}
+            variant="contained"
+            disabled={extensionFallbackDialog.running}
+          >
+            {extensionFallbackDialog.running ? 'Đang chuyển...' : 'Tiếp tục bằng extension'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Chọn mẫu tin nhắn nhanh</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+            {QUICK_TEMPLATES.map((template) => (
+              <Button
+                key={template}
+                variant="outlined"
+                onClick={() => {
+                  setMessage(template);
+                  setTemplateDialogOpen(false);
+                }}
+                sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
+              >
+                {template}
+              </Button>
+            ))}
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rewriteDialog.open} onClose={() => setRewriteDialog({ open: false, target: 'message', options: [] })} maxWidth="sm" fullWidth>
+        <DialogTitle>Gợi ý viết lại</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+            {rewriteDialog.options.map((option) => (
+              <Button
+                key={option}
+                variant="outlined"
+                onClick={() => applyRewriteOption(option)}
+                sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
+              >
+                {option}
+              </Button>
+            ))}
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={scheduleDialogOpen} onClose={() => setScheduleDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Lên lịch chạy</DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            type="datetime-local"
+            label="Thời gian chạy"
+            value={scheduleAt}
+            onChange={(event) => setScheduleAt(event.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setScheduleDialogOpen(false)}>Đóng</Button>
+          <Button onClick={() => setScheduleDialogOpen(false)} variant="contained">Xác nhận</Button>
+        </DialogActions>
+      </Dialog>
+
+      {!isPullGroupMode && (
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Typography variant="h6" fontWeight={700}>
+            Kết bạn
+          </Typography>
+          <Switch
+            checked={ketBanEnabled}
+            onChange={(event) => setKetBanEnabled(event.target.checked)}
+            size="small"
+            disabled={!hasAccount}
+          />
+        </Box>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Lời mời kết bạn (150 ký tự):
+        </Typography>
+
+        <Paper variant="outlined" sx={{ mb: 1 }}>
+          <TextField
+            fullWidth
+            multiline
+            rows={2}
+            value={friendRequest}
+            onChange={(event) => {
+              if (event.target.value.length <= 150) setFriendRequest(event.target.value);
+            }}
+            variant="standard"
+            InputProps={{ disableUnderline: true }}
+            disabled={!hasAccount || !ketBanEnabled}
+            sx={{ px: 1.5, py: 1 }}
+          />
+
+          <Box sx={{ display: 'flex', gap: 1, px: 1.5, pb: 1 }}>
+            <Button
+              size="small"
+              startIcon={<AiIcon fontSize="small" />}
+              disabled={!hasAccount || !ketBanEnabled || !friendRequest.trim()}
+              onClick={() => openRewriteDialog('friend')}
+              sx={{
+                textTransform: 'none',
+                fontSize: '0.8rem',
+                borderRadius: '16px',
+                px: 1.5,
+              }}
+            >
+              AI viết lại
+            </Button>
+          </Box>
+        </Paper>
+      </Box>
+      )}
+
+      {!isPullGroupMode && (
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Typography variant="h6" fontWeight={700}>
+            Nhắn tin
+          </Typography>
+          <Switch
+            checked={nhanTinEnabled}
+            onChange={(event) => setNhanTinEnabled(event.target.checked)}
+            size="small"
+          />
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Tin nhắn:
+          </Typography>
+          <IconButton size="small" disabled={!hasAccount || !nhanTinEnabled}>
+            <ImageIcon fontSize="small" />
+          </IconButton>
+          <IconButton size="small" disabled={!hasAccount || !nhanTinEnabled}>
+            <ListIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        <Paper variant="outlined" sx={{ mb: 1.5 }}>
+          <TextField
+            fullWidth
+            multiline
+            rows={2}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            variant="standard"
+            InputProps={{ disableUnderline: true }}
+            disabled={!hasAccount || !nhanTinEnabled}
+            sx={{ px: 1.5, py: 1 }}
+          />
+
+          <Box sx={{ display: 'flex', gap: 1, px: 1.5, pb: 1 }}>
+            <Button
+              size="small"
+              startIcon={<AiIcon fontSize="small" />}
+              disabled={!hasAccount || !nhanTinEnabled || !message.trim()}
+              onClick={() => openRewriteDialog('message')}
+              sx={{
+                textTransform: 'none',
+                fontSize: '0.8rem',
+                borderRadius: '16px',
+                px: 1.5,
+              }}
+            >
+              AI viết lại
+            </Button>
+            <Button
+              size="small"
+              startIcon={<FlashIcon fontSize="small" />}
+              disabled={!hasAccount || !nhanTinEnabled}
+              onClick={() => setTemplateDialogOpen(true)}
+              sx={{
+                textTransform: 'none',
+                fontSize: '0.8rem',
+                borderRadius: '16px',
+                px: 1.5,
+              }}
+            >
+              Tin nhắn nhanh
+            </Button>
+          </Box>
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            borderStyle: 'dashed',
+            cursor: nhanTinEnabled ? 'pointer' : 'not-allowed',
+            position: 'relative',
+            '&:hover': nhanTinEnabled ? { borderColor: 'primary.main', bgcolor: 'rgba(0,104,255,0.02)' } : undefined,
+          }}
+          onClick={() => {
+            if (hasAccount && nhanTinEnabled) {
+              document.getElementById('file-upload')?.click();
+            }
+          }}
+        >
+          <input
+            id="file-upload"
+            type="file"
+            multiple
+            accept="image/jpeg,.jpeg,.png,image/*,.jpg,video/*,.mp4,text/*,.txt,.csv,application/zip,.zip,.7z,.gz,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <Box component="img" src="/upload-illustration.svg" alt="upload" sx={{ width: 80, height: 80 }} />
+          <Box>
+            <Typography variant="subtitle2" fontWeight={700}>
+              Ảnh/Video/File đính kèm
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {selectedFiles.length ? `Đã chọn ${selectedFiles.length} tệp` : 'Kéo thả hoặc chọn tệp'}
+            </Typography>
+          </Box>
+        </Paper>
+
+        {selectedFiles.length > 0 && (
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
+            {selectedFiles.map((file) => (
+              <Chip key={`${file.name}-${file.size}`} label={file.name} onDelete={() => setSelectedFiles((prev) => prev.filter((item) => item !== file))} />
+            ))}
+          </Box>
+        )}
+      </Box>
+      )}
+
+      {isPullGroupMode && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" fontWeight={700} sx={{ mb: 1.5 }}>
+            Danh sách bạn bè để mời vào nhóm
+          </Typography>
+
+          <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Nhóm đích: {selectedGroupRowForPull?.name || 'Hãy chọn 1 nhóm ở cột phải'}
+            </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Tìm bạn bè theo tên/SĐT/ZID"
+              value={pullGroupSearchQuery}
+              onChange={(event) => setPullGroupSearchQuery(event.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Paper>
+
+          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1, borderBottom: '1px solid #eef2f6' }}>
+              <Checkbox
+                size="small"
+                checked={allPullGroupVisibleSelected}
+                onChange={(event) => toggleAllPullGroupFriends(event.target.checked)}
+              />
+              <Typography variant="body2" fontWeight={600}>
+                {selectedPullGroupFriends.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                bạn bè đã chọn
+              </Typography>
+            </Box>
+
+            <TableContainer sx={{ maxHeight: 480 }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" />
+                    <TableCell>Tên</TableCell>
+                    <TableCell>Số điện thoại</TableCell>
+                    <TableCell>Phân loại</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredPullGroupFriends.map((friend) => {
+                    const friendId = String(friend.zid || '');
+                    const checked = pullGroupFriendIds.includes(friendId);
+                    return (
+                      <TableRow key={friendId || friend.key} hover selected={checked}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            size="small"
+                            checked={checked}
+                            onChange={() => togglePullGroupFriend(friendId)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Avatar src={friend.avatar} sx={{ width: 28, height: 28 }}>
+                              {(friend.name || '?')[0]}
+                            </Avatar>
+                            <Typography variant="body2">{friend.name}</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">{friend.phone || '—'}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">{friend.classification || 'Chưa phân loại'}</Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {filteredPullGroupFriends.length === 0 && (
+              <Box sx={{ px: 2, py: 4 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Không tìm thấy bạn bè phù hợp để mời vào nhóm.
+                </Typography>
+              </Box>
+            )}
+          </Paper>
+        </Box>
+      )}
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, alignItems: 'center' }}>
+          <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
+            Cách nhau:
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <TextField
+              label="Từ (giây)"
+              value={delayFrom}
+              onChange={(event) => setDelayFrom(event.target.value)}
+              size="small"
+              type="text"
+              sx={{ width: 100 }}
+            />
+            <TextField
+              label="Đến (giây)"
+              value={delayTo}
+              onChange={(event) => setDelayTo(event.target.value)}
+              size="small"
+              type="text"
+              sx={{ width: 100 }}
+            />
+          </Box>
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Typography variant="body2" fontWeight={600}>
+            Spam
+          </Typography>
+          <Switch
+            checked={antiSpam}
+            onChange={(event) => setAntiSpam(event.target.checked)}
+            color="error"
+            size="small"
+          />
+        </Box>
+
+        <Button
+          variant="contained"
+          size="large"
+          type="button"
+          endIcon={<SendIcon />}
+          onClick={handleStart}
+          sx={{
+            width: 200,
+            height: 48,
+            fontWeight: 700,
+            fontSize: '0.9rem',
+            borderRadius: '8px',
+            bgcolor: 'rgb(32,101,209)',
+            boxShadow: 'none',
+            textTransform: 'none',
+            '&:hover': { bgcolor: 'rgb(24, 80, 170)' },
+          }}
+        >
+          Bắt Đầu
+        </Button>
+
+        <Box sx={{ position: 'relative' }}>
+          <Button
+            variant="contained"
+            onClick={() => setScheduleDialogOpen(true)}
+            disabled={!hasAccount || !selectedCount || (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected)}
+            sx={{
+              minWidth: 64,
+              height: 48,
+              borderRadius: '8px',
+              bgcolor: 'rgba(145,158,171,0.24)',
+              color: 'rgba(145,158,171,0.8)',
+              boxShadow: 'none',
+              '&:hover': { bgcolor: 'rgba(145,158,171,0.34)' },
+              '&.Mui-disabled': {
+                bgcolor: 'rgba(145,158,171,0.24)',
+                color: 'rgba(145,158,171,0.8)',
+              },
+            }}
+          >
+            <CalendarIcon />
+          </Button>
+          <Chip
+            label={scheduleAt ? 'Đã đặt' : 'Soon'}
+            size="small"
+            sx={{
+              position: 'absolute',
+              top: -8,
+              right: -8,
+              fontSize: '0.6rem',
+              height: 18,
+              fontWeight: 700,
+              bgcolor: scheduleAt ? '#00a76f' : '#ef5350',
+              color: '#fff',
+              '& .MuiChip-label': { px: 0.5 },
+            }}
+          />
+        </Box>
+      </Box>
+
+      {!isPullGroupMode && (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Hoạt động gần đây
+        </Typography>
+        {recentActivities.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Chưa có chiến dịch nào được tạo. Hãy chọn dữ liệu ở cột bên phải rồi bấm Bắt Đầu.
+          </Typography>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {recentActivities.map((activity) => (
+              <Box key={activity.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>
+                    {activity.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {activity.activityType === 'message'
+                      ? 'Nhắn tin'
+                      : activity.activityType === 'invite'
+                        ? 'Kết bạn'
+                        : activity.activityType === 'action'
+                          ? activity.actionLabel || 'Thao tác'
+                          : 'Đã lên lịch'} | {new Date(activity.timestamp || Date.now()).toLocaleString('vi-VN')}
+                  </Typography>
+                </Box>
+                <Chip label={activity.statusLabel || 'Đã tạo'} size="small" variant="outlined" />
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Paper>
+      )}
+    </Box>
+  );
+}
