@@ -254,7 +254,7 @@ function mergeServiceResultsIntoJobs(jobs, results, providerLabel) {
         provider: providerLabel,
         status: 'failed',
         statusLabel: 'Không có phản hồi',
-        error: 'Không nhận được phản hồi trạng thái từ local service.',
+        error: 'Không nhận được phản hồi trạng thái từ extension.',
       };
     }
 
@@ -482,7 +482,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [scheduleAt, setScheduleAt] = useState('');
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
-  const [extensionFallbackDialog, setExtensionFallbackDialog] = useState({ open: false, jobs: [], error: '', running: false });
+
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [pullGroupFriendIds, setPullGroupFriendIds] = useState([]);
   const [pullGroupSearchQuery, setPullGroupSearchQuery] = useState('');
@@ -724,52 +724,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     setRewriteDialog({ open: false, target: 'message', options: [] });
   };
 
-  const handleConfirmExtensionFallback = async () => {
-    const pendingJobs = Array.isArray(extensionFallbackDialog.jobs) ? extensionFallbackDialog.jobs : [];
-    if (!pendingJobs.length) {
-      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
-      return;
-    }
 
-    setExtensionFallbackDialog((prev) => ({ ...prev, running: true }));
-
-    try {
-      if (!activeAccountReady) {
-        throw new Error('Tài khoản chưa hoàn tất đồng bộ với extension. Hãy làm mới tài khoản và xác nhận đồng bộ trước khi gửi tin.');
-      }
-
-      const response = await executeMessageJobs({
-        account: activeAccount,
-        jobs: pendingJobs,
-      });
-
-      if (!response?.ok) {
-        throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin trên tab Zalo.');
-      }
-
-      const acceptedCount = Number(response.accepted || pendingJobs.length) || pendingJobs.length;
-      setFeedback({
-        severity: 'info',
-        message: `Extension đã nhận ${acceptedCount}/${pendingJobs.length} tin nhắn và đang gửi trên tab Zalo thật. Trạng thái sẽ cập nhật tự động bên phải.`,
-      });
-      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
-    } catch (error) {
-      onCampaignCommit?.({
-        messageJobs: pendingJobs.map((job) => ({
-          ...job,
-          status: 'failed',
-          statusLabel: 'Không thể kết nối extension',
-          error: error.message,
-        })),
-      });
-
-      setFeedback({
-        severity: 'error',
-        message: error.message,
-      });
-      setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
-    }
-  };
 
   const handleStart = async () => {
     if (!isActive) {
@@ -815,7 +770,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && unsupportedActionLabels.length > 0) {
       setFeedback({
         severity: 'warning',
-        message: `Các chức năng ${unsupportedActionLabels.join(', ')} đã hiện đúng theo tab nhưng chưa được nối vào local service/extension để chạy thật.`,
+        message: `Các chức năng ${unsupportedActionLabels.join(', ')} hiện chưa được hỗ trợ ở chế độ extension-only.`,
       });
       return;
     }
@@ -983,7 +938,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       const summary = inviteResolution.totals;
       setFeedback({
         severity: 'info',
-        message: `Nhóm đang xét có ${summary.totalMembers} thành viên, ${summary.friendCount} đã là bạn, ${summary.incomingRequestCount} đã gửi lời mời cho bạn, ${summary.outgoingRequestCount} bạn đã gửi lời mời trước đó. Đang gửi ${inviteRecords.length} lời mời kết bạn qua local service...`,
+        message: `Nhóm đang xét có ${summary.totalMembers} thành viên, ${summary.friendCount} đã là bạn, ${summary.incomingRequestCount} đã gửi lời mời cho bạn, ${summary.outgoingRequestCount} bạn đã gửi lời mời trước đó. Đang gửi ${inviteRecords.length} lời mời kết bạn qua extension...`,
       });
     } else if (actionRecords.length > 0) {
       setFeedback({
@@ -1361,48 +1316,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={extensionFallbackDialog.open}
-        onClose={() => {
-          if (extensionFallbackDialog.running) return;
-          setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false });
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Local service không sẵn sàng</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Không gửi được qua local service nên nếu tiếp tục, ứng dụng sẽ mở tab Zalo thật để nhờ extension gửi tin.
-          </Alert>
-          <Typography variant="body2" sx={{ mb: 1 }}>
-            Lỗi local service: {extensionFallbackDialog.error || 'Không rõ nguyên nhân.'}
-          </Typography>
-          {(extensionFallbackDialog.error || '').includes('hết hạn') && (
-            <Alert severity="info" sx={{ mb: 1 }}>
-              Cookie Zalo đã hết hạn. Hãy bấm <strong>Hủy</strong>, sau đó bấm nút <strong>Làm mới</strong> tài khoản (đăng nhập lại qua extension) để lấy phiên mới.
-            </Alert>
-          )}
-          <Typography variant="body2" color="text.secondary">
-            Nếu bạn không muốn bật tab Zalo, hãy bấm Hủy rồi kiểm tra lại local service ở cổng 4517.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setExtensionFallbackDialog({ open: false, jobs: [], error: '', running: false })}
-            disabled={extensionFallbackDialog.running}
-          >
-            Hủy
-          </Button>
-          <Button
-            onClick={handleConfirmExtensionFallback}
-            variant="contained"
-            disabled={extensionFallbackDialog.running}
-          >
-            {extensionFallbackDialog.running ? 'Đang chuyển...' : 'Tiếp tục bằng extension'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+
 
       <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Chọn mẫu tin nhắn nhanh</DialogTitle>
