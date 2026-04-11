@@ -595,11 +595,6 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     setSelectedRows(new Set(nextKeys));
   };
 
-  useEffect(() => {
-    if (!isDrilledIntoMembers) return;
-    setSelectedRows(new Set());
-  }, [isDrilledIntoMembers, drilledGroup?.zid]);
-
   const addManualEntry = async () => {
     const raw = manualPhoneInput.trim();
     if (!raw) return;
