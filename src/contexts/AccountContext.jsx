@@ -426,6 +426,53 @@ export function AccountProvider({ children }) {
     }
   }, [activeAccountIndex, accounts]);
 
+  // Auto-fetch friend requests from backend after extension sync (extension doesn't collect them)
+  const friendRequestFetchedRef = useRef(false);
+  useEffect(() => {
+    if (syncState?.phase !== 'ready') {
+      friendRequestFetchedRef.current = false;
+      return;
+    }
+    if (friendRequestFetchedRef.current) return;
+    const acct = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
+    if (!acct) return;
+    // Only auto-fetch if friend requests are empty (extension didn't provide them)
+    if (acct.sentFriendRequests?.length || acct.receivedFriendRequests?.length) return;
+
+    const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+    if (!API_BASE) return;
+
+    friendRequestFetchedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: acct }),
+        });
+        const result = await res.json();
+        if (!result?.ok || !result.data) return;
+        const d = result.data;
+        const sentReqs = Array.isArray(d.sentFriendRequests) ? d.sentFriendRequests : [];
+        const recvReqs = Array.isArray(d.receivedFriendRequests) ? d.receivedFriendRequests : [];
+        if (sentReqs.length || recvReqs.length) {
+          updateAccountById(acct.id, { sentFriendRequests: sentReqs, receivedFriendRequests: recvReqs });
+          setSentFriendRequests(sentReqs);
+          setReceivedFriendRequests(recvReqs);
+        }
+        // Also update friends/groups if backend returned more data
+        if (Array.isArray(d.friends) && d.friends.length) {
+          updateAccountById(acct.id, { friends: d.friends });
+          setFriends(d.friends);
+        }
+        if (Array.isArray(d.groups) && d.groups.length) {
+          updateAccountById(acct.id, { groups: d.groups });
+          setGroups(d.groups);
+        }
+      } catch (_) { /* silent — friend requests are optional */ }
+    })();
+  }, [syncState?.phase, activeAccountIndex, accounts, updateAccountById]);
+
   // Add account: tell extension to open incognito for Zalo login
   const addAccount = useCallback(async () => {
     if (!extensionActive) return { success: false, error: 'extension_not_found' };

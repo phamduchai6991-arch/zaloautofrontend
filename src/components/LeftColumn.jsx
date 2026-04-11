@@ -1043,12 +1043,12 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     if (!isScheduled && actionRecords.length > 0) {
       let backendActionOk = false;
 
-      // --- Strategy 1: Backend API ---
+      // --- Strategy 1: Backend API (NDJSON streaming) ---
       if (API_BASE) {
         try {
           setFeedback({
             severity: 'info',
-            message: `Đang thực thi ${actionRecords.length} thao tác quản lý qua server...`,
+            message: `Đang thực thi 0/${actionRecords.length} thao tác quản lý qua server...`,
           });
 
           const res = await fetch(`${API_BASE}/api/zalo/actions/batch`, {
@@ -1060,25 +1060,34 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             }),
           });
 
-          const result = await res.json();
-
-          if (result?.ok && Array.isArray(result.results)) {
+          if (res.ok && res.body) {
             backendActionOk = true;
+            let actionAccepted = 0;
+            let actionFailed = 0;
 
-            onCampaignCommit?.({
-              actionJobs: result.results.map((r) => ({
-                ...(actionRecords.find((j) => j.id === r.jobId) || {}),
-                ...r,
-                provider: 'server',
-              })),
+            await readNdjsonStream(res, (data) => {
+              const originalJob = actionRecords.find((j) => j.id === data.jobId) || {};
+              const mergedJob = { ...originalJob, ...data, provider: 'server' };
+
+              if (data.status === 'running') {
+                setFeedback({
+                  severity: 'info',
+                  message: data.statusLabel || `Đang xử lý ${actionAccepted + actionFailed + 1}/${actionRecords.length}...`,
+                });
+              } else {
+                onCampaignCommit?.({ actionJobs: [mergedJob] });
+                if (data.ok) actionAccepted++;
+                else actionFailed++;
+                setFeedback({
+                  severity: data.ok ? 'success' : 'warning',
+                  message: data.statusLabel || `Đã xử lý ${actionAccepted + actionFailed}/${actionRecords.length}`,
+                });
+              }
             });
 
-            const sent = Number(result.accepted || 0);
-            const failed = Number(result.failed || 0);
-
             actionSummary = {
-              severity: failed > 0 ? 'warning' : 'success',
-              message: `Server đã xử lý ${sent}/${actionRecords.length} thao tác.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
+              severity: actionFailed > 0 ? 'warning' : 'success',
+              message: `Server đã xử lý ${actionAccepted}/${actionRecords.length} thao tác.${actionFailed > 0 ? ` ${actionFailed} thất bại.` : ''}`,
             };
           }
         } catch (_) {
