@@ -61,6 +61,7 @@ import {
   getTabActionKeys,
   getUnsupportedActionLabels,
   SUPPORTED_REMOTE_ACTION_KEYS,
+  CONTROL_DEFINITIONS,
 } from '../utils/reachActionConfig';
 import { hideContactsForAccount } from '../utils/reachVisibilityStore';
 
@@ -847,7 +848,11 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && unsupportedActionLabels.length === 0) {
-      setFeedback({ severity: 'warning', message: 'Hãy bật ít nhất một hành động trước khi chạy.' });
+      const availableLabels = activeTabActionKeys.map((key) => CONTROL_DEFINITIONS[key]?.label).filter(Boolean);
+      const hint = availableLabels.length
+        ? ` Hãy bật ${availableLabels.join(', ')} ở cột bên phải${canInviteFromCurrentTab ? ', hoặc Kết bạn / Nhắn tin ở cột bên trái' : ''}.`
+        : '';
+      setFeedback({ severity: 'warning', message: `Hãy bật ít nhất một hành động trước khi chạy.${hint}` });
       return;
     }
 
