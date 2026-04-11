@@ -476,7 +476,12 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       return;
     }
 
-    setDrilledGroup(selectedGroupForMemberView);
+    setDrilledGroup((prev) => {
+      const prevId = String(prev?.zid || prev?.key || '').trim();
+      const nextId = String(selectedGroupForMemberView?.zid || selectedGroupForMemberView?.key || '').trim();
+      if (prevId === nextId && prevId) return prev;
+      return selectedGroupForMemberView;
+    });
     setPage(0);
   }, [activeTab, viewState.showHiddenMembers, selectedGroupForMemberView]);
 
@@ -493,6 +498,8 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       setGroupMembersError('');
       return;
     }
+
+    if (groupMembersError) return;
 
     let cancelled = false;
     setGroupMembersLoading(true);
@@ -541,7 +548,8 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     return () => {
       cancelled = true;
     };
-  }, [drilledGroup, activeAccount, viewState.showHiddenMembers, groupMembersCache]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drilledGroup, activeAccount, viewState.showHiddenMembers]);
 
   useEffect(() => {
     if (!onSelectionChange) return;
