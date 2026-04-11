@@ -570,21 +570,33 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   }, [activeTab, activeRows, selectedRows, viewState, isDrilledIntoMembers, drilledGroup, onSelectionChange]);
 
   const handleSelectAll = (checked) => {
+    const drilledGroupKey = isDrilledIntoMembers && drilledGroup
+      ? buildRowKey(drilledGroup, groupRowsForMemberView.findIndex((row) => buildRowKey(row) === buildRowKey(drilledGroup)))
+      : null;
+
     if (checked) {
-      setSelectedRows(new Set(activeRows.map((row, idx) => buildRowKey(row, idx))));
+      const nextKeys = activeRows.map((row, idx) => buildRowKey(row, idx));
+      if (drilledGroupKey) nextKeys.unshift(drilledGroupKey);
+      setSelectedRows(new Set(nextKeys));
     } else {
-      setSelectedRows(new Set());
+      setSelectedRows(drilledGroupKey ? new Set([drilledGroupKey]) : new Set());
     }
   };
 
   const handleSelectFirstRows = (limit) => {
+    const drilledGroupKey = isDrilledIntoMembers && drilledGroup
+      ? buildRowKey(drilledGroup, groupRowsForMemberView.findIndex((row) => buildRowKey(row) === buildRowKey(drilledGroup)))
+      : null;
+
     if (!activeRows.length) {
-      setSelectedRows(new Set());
+      setSelectedRows(drilledGroupKey ? new Set([drilledGroupKey]) : new Set());
       return;
     }
 
     if (limit === 'all') {
-      setSelectedRows(new Set(activeRows.map((row, idx) => buildRowKey(row, idx))));
+      const nextKeys = activeRows.map((row, idx) => buildRowKey(row, idx));
+      if (drilledGroupKey) nextKeys.unshift(drilledGroupKey);
+      setSelectedRows(new Set(nextKeys));
       return;
     }
 
@@ -592,6 +604,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     const nextKeys = activeRows
       .slice(0, normalizedLimit)
       .map((row, idx) => buildRowKey(row, idx));
+    if (drilledGroupKey) nextKeys.unshift(drilledGroupKey);
     setSelectedRows(new Set(nextKeys));
   };
 
