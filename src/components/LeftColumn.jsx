@@ -569,9 +569,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const selectedItems = selection?.selectedItems || [];
   const selectedCount = selectedItems.length;
   const selectedLabel = selection?.activeLabel || 'Bạn bè';
+  const activeViewState = selection?.viewState && typeof selection.viewState === 'object'
+    ? selection.viewState
+    : {};
   const hasAccount = accounts.length > 0;
   const activeTabActionKeys = getTabActionKeys(selection?.activeTab);
   const enabledTabActionKeys = activeTabActionKeys.filter((key) => Boolean(actionState?.[key]));
+  const enabledLocalViewLabels = Object.entries(activeViewState)
+    .filter(([key, value]) => Boolean(value) && CONTROL_DEFINITIONS[key]?.kind === 'local')
+    .map(([key]) => CONTROL_DEFINITIONS[key]?.label)
+    .filter(Boolean);
   const unsupportedActionLabels = getUnsupportedActionLabels(selection?.activeTab, actionState);
   const hasSupportedActionSelected = enabledTabActionKeys.some((key) => SUPPORTED_REMOTE_ACTION_KEYS.has(key));
   const removeFriendEnabled = selection?.activeTab === 0 && Boolean(actionState?.removeFriend);
@@ -844,6 +851,18 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
     if (!selectedCount) {
       setFeedback({ severity: 'warning', message: 'Hãy chọn ít nhất một dòng dữ liệu ở cột bên phải.' });
+      return;
+    }
+
+    if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && enabledLocalViewLabels.length > 0) {
+      const availableLabels = activeTabActionKeys.map((key) => CONTROL_DEFINITIONS[key]?.label).filter(Boolean);
+      const nextStep = availableLabels.length
+        ? ` Muốn chạy thao tác, hãy bật ${availableLabels.join(', ')} ở cột bên phải${canInviteFromCurrentTab ? ', hoặc Kết bạn / Nhắn tin ở cột bên trái' : ''}.`
+        : '';
+      setFeedback({
+        severity: 'info',
+        message: `${enabledLocalViewLabels.join(', ')} chỉ là tuỳ chọn hiển thị danh sách và đã áp dụng ngay, không cần bấm Bắt Đầu.${nextStep}`,
+      });
       return;
     }
 

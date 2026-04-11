@@ -64,6 +64,7 @@ export default function ReachPage() {
     activeLabel: 'Bạn bè',
     allItems: [],
     selectedItems: [],
+    viewState: {},
   });
   const [campaignState, setCampaignState] = useState(loadCampaignState);
 

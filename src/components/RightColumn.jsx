@@ -445,8 +445,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       activeLabel: DATA_TABS[activeTab]?.label || 'Dữ liệu',
       allItems: activeRows,
       selectedItems: activeRows.filter((row, idx) => selectedRows.has(buildRowKey(row, idx))),
+      viewState,
     });
-  }, [activeTab, activeRows.length, selectedRows.size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, activeRows.length, selectedRows.size, viewState, onSelectionChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectAll = (checked) => {
     if (checked) {
