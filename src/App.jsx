@@ -1,18 +1,17 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Box } from '@mui/material';
 import HeaderBar from './components/HeaderBar';
 import Sidebar from './components/Sidebar';
 import { SubscriptionProvider } from './contexts/SubscriptionContext';
-
-const AccountsPage = lazy(() => import('./pages/AccountsPage'));
-const MessagesPage = lazy(() => import('./pages/MessagesPage'));
-const ReachPage = lazy(() => import('./pages/ReachPage'));
-const PricingPage = lazy(() => import('./pages/PricingPage'));
-const GuidePage = lazy(() => import('./pages/GuidePage'));
-const LoginPage = lazy(() => import('./pages/LoginPage'));
-const SupportPage = lazy(() => import('./pages/SupportPage'));
-const AdminPage = lazy(() => import('./pages/AdminPage'));
+import AccountsPage from './pages/AccountsPage';
+import MessagesPage from './pages/MessagesPage';
+import ReachPage from './pages/ReachPage';
+import PricingPage from './pages/PricingPage';
+import GuidePage from './pages/GuidePage';
+import LoginPage from './pages/LoginPage';
+import SupportPage from './pages/SupportPage';
+import AdminPage from './pages/AdminPage';
 
 function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -31,9 +30,7 @@ function Layout() {
       >
         <HeaderBar />
         <Box sx={{ flex: 1, overflow: 'auto' }}>
-          <Suspense fallback={<Box sx={{ p: 3 }}>Đang tải màn hình...</Box>}>
-            <Outlet />
-          </Suspense>
+          <Outlet />
         </Box>
       </Box>
     </Box>

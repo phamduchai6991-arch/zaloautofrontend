@@ -12,17 +12,15 @@ import {
 import {
   EditNote as EditNoteIcon,
   Person as PersonIcon,
-  Chat as ChatIcon,
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
 } from '@mui/icons-material';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const DRAWER_WIDTH = 280;
 
 const mainMenu = [
   { icon: <EditNoteIcon />, label: 'Tương Tác', path: '/reach' },
-  { icon: <ChatIcon />, label: 'Quản Lý Tin Nhắn', path: '/messages' },
   { icon: <PersonIcon />, label: 'Tài Khoản Zalo', path: '/accounts' },
 ];
 
