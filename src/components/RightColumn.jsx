@@ -61,7 +61,7 @@ import {
   loadGroupLibraryEntries,
   subscribeGroupLibraryChange,
 } from '../utils/reachGroupLibraryStore';
-import { resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
+import { resolveGroupInviteTargetsViaLocalService, findUserByPhoneViaLocalService } from '../utils/localZaloService';
 
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
 const GROUP_COLLECTIONS_KEY = 'zt_group_collections';
@@ -157,6 +157,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   const [page, setPage] = useState(0);
   const [rowsPerPage] = useState(10);
   const [manualPhoneInput, setManualPhoneInput] = useState('');
+  const [phoneLookupLoading, setPhoneLookupLoading] = useState(false);
   const [manualEntries, setManualEntries] = useState(() => {
     try {
       const raw = localStorage.getItem('zt_manual_phones');
@@ -357,17 +358,20 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       .filter((entry) => {
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
-        return String(entry.phone || '').includes(q) || String(entry.zid || '').includes(q);
+        return String(entry.phone || '').includes(q)
+          || String(entry.zid || '').includes(q)
+          || String(entry.name || '').toLowerCase().includes(q);
       })
       .map((entry, idx) => ({
         key: `manual_${entry.phone || entry.zid || idx}`,
         rowKey: `manual_${entry.phone || entry.zid || idx}`,
-        name: '',
-        avatar: '',
+        name: entry.name || (entry.found === false ? 'Chưa đăng ký Zalo' : ''),
+        avatar: entry.avatar || '',
         phone: entry.phone || '—',
         zid: entry.zid || entry.phone || '—',
-        classification: entry.zid || entry.phone || '—',
+        classification: entry.found === false ? 'Không tìm thấy' : (entry.zid || entry.phone || '—'),
         isManual: true,
+        found: entry.found,
       })),
     ...filteredFriendRows.map((friend) => ({
       ...friend,
@@ -571,17 +575,59 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     }
   };
 
-  const addManualEntry = () => {
+  const addManualEntry = async () => {
     const raw = manualPhoneInput.trim();
     if (!raw) return;
     const lines = raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
     const existing = new Set(manualEntries.map((e) => e.phone));
-    const newEntries = lines.filter((l) => !existing.has(l)).map((phone) => ({ phone, zid: phone }));
-    if (newEntries.length === 0) return;
-    const updated = [...newEntries, ...manualEntries];
-    setManualEntries(updated);
-    try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+    const newPhones = lines.filter((l) => !existing.has(l));
+    if (newPhones.length === 0) return;
     setManualPhoneInput('');
+
+    if (!activeAccount) {
+      // No account → store raw entries without lookup
+      const rawEntries = newPhones.map((phone) => ({ phone, zid: phone }));
+      const updated = [...rawEntries, ...manualEntries];
+      setManualEntries(updated);
+      try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+      return;
+    }
+
+    setPhoneLookupLoading(true);
+    try {
+      const response = await findUserByPhoneViaLocalService({
+        account: activeAccount,
+        phones: newPhones,
+      });
+      const resultMap = new Map();
+      (response?.results || []).forEach((r) => { resultMap.set(r.phone, r); });
+
+      const resolved = newPhones.map((phone) => {
+        const r = resultMap.get(phone);
+        if (r?.found) {
+          return {
+            phone,
+            zid: r.uid || phone,
+            name: r.displayName || r.zaloName || '',
+            avatar: r.avatar || '',
+            found: true,
+          };
+        }
+        return { phone, zid: phone, name: '', avatar: '', found: false, error: r?.error || '' };
+      });
+
+      const updated = [...resolved, ...manualEntries];
+      setManualEntries(updated);
+      try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+    } catch {
+      // Fallback: store raw entries if service fails
+      const rawEntries = newPhones.map((phone) => ({ phone, zid: phone }));
+      const updated = [...rawEntries, ...manualEntries];
+      setManualEntries(updated);
+      try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+    } finally {
+      setPhoneLookupLoading(false);
+    }
   };
 
   const removeManualEntries = () => {
@@ -788,8 +834,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         />
         {activeTab === 3 && (
           <>
-            <Button size="small" variant="outlined" onClick={addManualEntry} sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 52, py: 0.5 }}>
-              Thêm
+            <Button size="small" variant="outlined" onClick={addManualEntry} disabled={phoneLookupLoading}
+              sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 52, py: 0.5 }}>
+              {phoneLookupLoading ? 'Đang tra...' : 'Tra cứu'}
             </Button>
             <Button size="small" variant="outlined" color="error" onClick={removeManualEntries} disabled={selectedRows.size === 0}
               sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 44, py: 0.5 }}>
@@ -826,9 +873,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
                 {isDrilledIntoMembers ? 'Loại' : (activeTab === 1 ? 'Thành viên' : activeTab === 2 ? 'Thông tin' : activeTab === 3 ? 'Số điện thoại/ Zalo ID' : activeTab === 4 || activeTab === 5 ? 'Thời gian' : 'Số điện thoại')}
               </TableCell>
-              {!isDrilledIntoMembers && activeTab !== 3 && (
+              {!isDrilledIntoMembers && (
                 <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
-                  {activeTab === 2 ? 'Mô tả' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
+                  {activeTab === 2 ? 'Mô tả' : activeTab === 3 ? 'Trạng thái' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
                 </TableCell>
               )}
             </TableRow>
@@ -866,7 +913,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                         <Avatar src={row.avatar} sx={{ width: 24, height: 24, fontSize: '0.7rem' }}>
                           {(row.name || '?')[0]}
                         </Avatar>
-                        <Typography variant="caption">{row.name}</Typography>
+                        <Typography variant="caption" color={row.found === false ? 'error.main' : undefined}>
+                          {row.name}
+                        </Typography>
                       </>
                     ) : (
                       <Typography variant="caption" color="text.secondary">—</Typography>
@@ -884,7 +933,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                     </Typography>
                   )}
                 </TableCell>
-                {!isDrilledIntoMembers && activeTab !== 3 && (
+                {!isDrilledIntoMembers && (
                 <TableCell>
                   {activeTab === 0 ? (
                     <FormControl size="small" fullWidth>
@@ -942,6 +991,14 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                     <Typography variant="caption" color="text.secondary">
                       {row.classification || '—'}
                     </Typography>
+                  ) : activeTab === 3 ? (
+                    row.found === false ? (
+                      <Chip label="Không tìm thấy" size="small" color="error" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
+                    ) : row.found === true ? (
+                      <Chip label="Đã tìm thấy" size="small" color="success" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">—</Typography>
+                    )
                   ) : (
                     <Chip label={row.classification || 'Chưa phân loại'} size="small" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
                   )}

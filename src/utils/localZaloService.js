@@ -81,3 +81,7 @@ export function resolveGroupInviteTargetsViaLocalService(payload) {
 export function runAccountActionJobsViaLocalService(payload) {
   return requestLocalZaloService('/api/zalo/actions/batch', payload, 180000);
 }
+
+export function findUserByPhoneViaLocalService(payload) {
+  return requestLocalZaloService('/api/zalo/find-user', payload, 60000);
+}
