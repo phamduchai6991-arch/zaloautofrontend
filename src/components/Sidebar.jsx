@@ -12,40 +12,44 @@ import {
 import {
   EditNote as EditNoteIcon,
   Person as PersonIcon,
+  Chat as ChatIcon,
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
 } from '@mui/icons-material';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 
 const DRAWER_WIDTH = 280;
 
 const mainMenu = [
   { icon: <EditNoteIcon />, label: 'Tương Tác', path: '/reach' },
+  { icon: <ChatIcon />, label: 'Quản Lý Tin Nhắn', path: '/messages' },
   { icon: <PersonIcon />, label: 'Tài Khoản Zalo', path: '/accounts' },
 ];
 
 const bottomMenu = [
   { icon: <GuideIcon />, label: 'Hướng Dẫn Sử Dụng', path: '/guide' },
-  { icon: <SupportIcon />, label: 'Hổ Trợ Online', path: '/support' },
+  { icon: <SupportIcon />, label: 'Hỗ Trợ Online', path: '/support' },
 ];
 
 export default function Sidebar({ open, onToggle }) {
   const drawerWidth = open ? DRAWER_WIDTH : 80;
   const location = useLocation();
+  const navigate = useNavigate();
 
   const renderItem = (item, idx) => {
     const isActive = item.path ? location.pathname.startsWith(item.path) : false;
 
     const linkProps = item.href
       ? { component: 'a', href: item.href, target: '_blank', rel: 'noopener noreferrer' }
-      : item.path
-        ? { component: Link, to: item.path }
-        : {};
+      : {};
+
+    const handleClick = item.path ? () => navigate(item.path) : undefined;
 
     return (
     <ListItemButton
       key={idx}
       {...linkProps}
+      onClick={handleClick}
       sx={{
         borderRadius: 1.5,
         mx: 1,
