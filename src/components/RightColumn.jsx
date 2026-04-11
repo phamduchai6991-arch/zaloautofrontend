@@ -437,7 +437,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   const activeRows = isDrilledIntoMembers ? drilledMemberRows : (tabRows[activeTab] || []);
   const activeCount = activeRows.length;
   const paginatedRows = activeRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const activeSelectedCount = activeRows.filter((row, idx) => selectedRows.has(buildRowKey(row, idx))).length;
   const allRowsSelected = activeCount > 0 && activeRows.every((row, idx) => selectedRows.has(buildRowKey(row, idx)));
+  const canUseSelectionShortcuts = activeTab === 0 || isDrilledIntoMembers;
   const controlRows = getTabControlRows(activeTab);
   const showCollectionFilter = TABS_WITH_COLLECTION_FILTER.has(activeTab) && !isDrilledIntoMembers;
   const searchPlaceholder = TAB_SEARCH_PLACEHOLDERS[activeTab] || 'Tìm kiếm';
@@ -574,6 +576,29 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       setSelectedRows(new Set());
     }
   };
+
+  const handleSelectFirstRows = (limit) => {
+    if (!activeRows.length) {
+      setSelectedRows(new Set());
+      return;
+    }
+
+    if (limit === 'all') {
+      setSelectedRows(new Set(activeRows.map((row, idx) => buildRowKey(row, idx))));
+      return;
+    }
+
+    const normalizedLimit = Math.max(0, Number(limit) || 0);
+    const nextKeys = activeRows
+      .slice(0, normalizedLimit)
+      .map((row, idx) => buildRowKey(row, idx));
+    setSelectedRows(new Set(nextKeys));
+  };
+
+  useEffect(() => {
+    if (!isDrilledIntoMembers) return;
+    setSelectedRows(new Set());
+  }, [isDrilledIntoMembers, drilledGroup?.zid]);
 
   const addManualEntry = async () => {
     const raw = manualPhoneInput.trim();
@@ -813,11 +838,43 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         <Checkbox
           size="small"
           checked={allRowsSelected}
+          indeterminate={activeSelectedCount > 0 && !allRowsSelected}
           onChange={(e) => handleSelectAll(e.target.checked)}
         />
         <Typography variant="caption" fontWeight={600}>
           {activeCount}
         </Typography>
+        {canUseSelectionShortcuts && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => handleSelectFirstRows(50)}
+              disabled={activeCount === 0}
+              sx={{ textTransform: 'none', fontSize: '0.72rem', minWidth: 56, py: 0.35, px: 1 }}
+            >
+              50 đầu
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => handleSelectFirstRows(100)}
+              disabled={activeCount === 0}
+              sx={{ textTransform: 'none', fontSize: '0.72rem', minWidth: 64, py: 0.35, px: 1 }}
+            >
+              100 đầu
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => handleSelectFirstRows('all')}
+              disabled={activeCount === 0}
+              sx={{ textTransform: 'none', fontSize: '0.72rem', minWidth: 68, py: 0.35, px: 1 }}
+            >
+              Toàn bộ
+            </Button>
+          </Box>
+        )}
         <TextField
           size="small"
           placeholder={isDrilledIntoMembers ? 'Tìm kiếm' : activeTab === 3 ? 'Tìm theo số điện thoại/ZID' : searchPlaceholder}
