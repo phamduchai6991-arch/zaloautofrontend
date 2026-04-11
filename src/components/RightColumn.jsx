@@ -6,6 +6,10 @@ import {
   Button,
   Checkbox,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   IconButton,
   InputAdornment,
@@ -157,6 +161,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   const [page, setPage] = useState(0);
   const [rowsPerPage] = useState(10);
   const [manualPhoneInput, setManualPhoneInput] = useState('');
+  const [manualEntryDialogOpen, setManualEntryDialogOpen] = useState(false);
   const [phoneLookupLoading, setPhoneLookupLoading] = useState(false);
   const [manualEntries, setManualEntries] = useState(() => {
     try {
@@ -608,14 +613,15 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     setSelectedRows(new Set(nextKeys));
   };
 
-  const addManualEntry = async () => {
-    const raw = manualPhoneInput.trim();
+  const addManualEntry = async (rawValue = manualPhoneInput) => {
+    const raw = String(rawValue || '').trim();
     if (!raw) return;
     const lines = raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
     const existing = new Set(manualEntries.map((e) => e.phone));
     const newPhones = lines.filter((l) => !existing.has(l));
     if (newPhones.length === 0) return;
     setManualPhoneInput('');
+    setManualEntryDialogOpen(false);
 
     if (!activeAccount) {
       // No account → store raw entries without lookup
@@ -899,9 +905,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         />
         {activeTab === 3 && (
           <>
-            <Button size="small" variant="outlined" onClick={addManualEntry} disabled={phoneLookupLoading}
+            <Button size="small" variant="outlined" onClick={() => setManualEntryDialogOpen(true)} disabled={phoneLookupLoading}
               sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 52, py: 0.5 }}>
-              {phoneLookupLoading ? 'Đang tra...' : 'Tra cứu'}
+              {phoneLookupLoading ? 'Đang thêm...' : 'Thêm'}
             </Button>
             <Button size="small" variant="outlined" color="error" onClick={removeManualEntries} disabled={selectedRows.size === 0}
               sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 44, py: 0.5 }}>
@@ -911,20 +917,50 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         )}
       </Box>
 
-      {activeTab === 3 && (
-        <TextField
-          size="small"
-          multiline
-          minRows={2}
-          maxRows={4}
-          placeholder="Nhập số điện thoại hoặc ZID (mỗi dòng 1 số, hoặc ngăn bằng dấu phẩy)"
-          value={manualPhoneInput}
-          onChange={(e) => setManualPhoneInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addManualEntry(); } }}
-          fullWidth
-          sx={{ mb: 1, '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
-        />
-      )}
+      <Dialog
+        open={activeTab === 3 && manualEntryDialogOpen}
+        onClose={phoneLookupLoading ? undefined : () => setManualEntryDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, pb: 1.5 }}>
+          Nhập dữ liệu
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            multiline
+            minRows={6}
+            maxRows={10}
+            fullWidth
+            placeholder="Danh sách SĐT/ZID"
+            value={manualPhoneInput}
+            onChange={(e) => setManualPhoneInput(e.target.value)}
+            sx={{ '& .MuiInputBase-input': { fontSize: '0.95rem' } }}
+          />
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2, whiteSpace: 'pre-line' }}>
+            {`Ví dụ:\n0121292312\n84932183213\n381231233\n+84932183222\n...`}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button
+            onClick={() => setManualEntryDialogOpen(false)}
+            disabled={phoneLookupLoading}
+            sx={{ textTransform: 'none' }}
+          >
+            Hủy
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => addManualEntry()}
+            disabled={phoneLookupLoading || !manualPhoneInput.trim()}
+            sx={{ textTransform: 'none', minWidth: 120, borderRadius: 2.5 }}
+          >
+            {phoneLookupLoading ? 'Đang thêm...' : 'Lưu'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <TableContainer>
         <Table size="small" sx={{ '& .MuiTableCell-root': { py: 0.5, px: 1, fontSize: '0.78rem' } }}>
