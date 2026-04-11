@@ -437,6 +437,11 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     );
   }, [drilledGroup, friends, activeAccount?.userId, searchQuery]);
 
+  const groupRowsForMemberView = activeTab === 2 ? groupLibraryRows : filteredGroupRows;
+  const selectedGroupRows = (activeTab === 1 || activeTab === 2)
+    ? groupRowsForMemberView.filter((row, idx) => selectedRows.has(buildRowKey(row, idx)))
+    : [];
+  const selectedGroupForMemberView = selectedGroupRows.length === 1 ? selectedGroupRows[0] : null;
   const isDrilledIntoMembers = Boolean(drilledGroup) && (activeTab === 1 || activeTab === 2);
 
   const tabRows = {
@@ -484,6 +489,21 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   };
 
   useEffect(() => {
+    if (activeTab !== 1 && activeTab !== 2) {
+      setDrilledGroup(null);
+      return;
+    }
+
+    if (!viewState.showHiddenMembers) {
+      setDrilledGroup(null);
+      return;
+    }
+
+    setDrilledGroup(selectedGroupForMemberView);
+    setPage(0);
+  }, [activeTab, viewState.showHiddenMembers, selectedGroupForMemberView]);
+
+  useEffect(() => {
     if (!onSelectionChange) return;
     onSelectionChange({
       activeTab,
@@ -495,7 +515,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       viewState,
       isDrilledIntoMembers,
     });
-  }, [activeTab, activeRows.length, selectedRows.size, viewState, isDrilledIntoMembers, onSelectionChange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, activeRows, selectedRows, viewState, isDrilledIntoMembers, drilledGroup, onSelectionChange]);
 
   const handleSelectAll = (checked) => {
     if (checked) {
@@ -527,6 +547,18 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
   const handleSelectRow = (row, idx) => {
     const rowKey = buildRowKey(row, idx);
+
+    if (!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) && viewState.showHiddenMembers) {
+      setSearchQuery('');
+      setSelectedRows((prev) => {
+        if (prev.has(rowKey) && prev.size === 1) {
+          return new Set();
+        }
+        return new Set([rowKey]);
+      });
+      return;
+    }
+
     setSelectedRows((prev) => {
       const next = new Set(prev);
       if (next.has(rowKey)) next.delete(rowKey);
@@ -662,7 +694,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
       {isDrilledIntoMembers && drilledGroup && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, p: 1, bgcolor: '#e3f2fd', borderRadius: 2 }}>
-          <IconButton size="small" onClick={() => { setDrilledGroup(null); setSelectedRows(new Set()); setPage(0); }}>
+          <IconButton size="small" onClick={() => { setDrilledGroup(null); setSelectedRows(new Set()); setPage(0); setSearchQuery(''); }}>
             <ArrowBackIcon fontSize="small" />
           </IconButton>
           <Avatar src={drilledGroup.avatar} sx={{ width: 28, height: 28, fontSize: '0.75rem' }}>
@@ -753,12 +785,19 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
             {paginatedRows.map((row, idx) => {
               const globalIdx = page * rowsPerPage + idx;
               return (
-              <TableRow key={buildRowKey(row, globalIdx)} hover selected={selectedRows.has(buildRowKey(row, globalIdx))}>
+              <TableRow
+                key={buildRowKey(row, globalIdx)}
+                hover
+                selected={selectedRows.has(buildRowKey(row, globalIdx))}
+                onClick={!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? () => handleSelectRow(row, globalIdx) : undefined}
+                sx={!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? { cursor: 'pointer' } : undefined}
+              >
                 <TableCell padding="checkbox">
                   <Checkbox
                     size="small"
                     checked={selectedRows.has(buildRowKey(row, globalIdx))}
                     onChange={() => handleSelectRow(row, globalIdx)}
+                    onClick={(event) => event.stopPropagation()}
                   />
                 </TableCell>
                 <TableCell>
@@ -767,15 +806,8 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                       display: 'flex',
                       alignItems: 'center',
                       gap: 0.75,
-                      ...(!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? { cursor: 'pointer', '&:hover': { color: 'primary.main' } } : {}),
+                      ...(!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? { '&:hover': { color: 'primary.main' } } : {}),
                     }}
-                    onClick={!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? (e) => {
-                      e.stopPropagation();
-                      setDrilledGroup(row);
-                      setSelectedRows(new Set());
-                      setPage(0);
-                      setSearchQuery('');
-                    } : undefined}
                   >
                     {row.name ? (
                       <>
