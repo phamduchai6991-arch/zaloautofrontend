@@ -3,6 +3,7 @@ import {
   Alert,
   Avatar,
   Box,
+  Button,
   Checkbox,
   Chip,
   FormControl,
@@ -17,6 +18,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -25,6 +27,7 @@ import {
 import {
   ArrowUpward as SortIcon,
   CollectionsBookmark as LibraryIcon,
+  Delete as DeleteIcon,
   Group as GroupIcon,
   Mail as MailIcon,
   MoreHoriz as MoreHorizIcon,
@@ -149,6 +152,15 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   const [groupLibraryEntries, setGroupLibraryEntries] = useState(() => loadGroupLibraryEntries());
   const [viewState, setViewState] = useState(LOCAL_VIEW_DEFAULTS);
   const [hiddenContactIds, setHiddenContactIds] = useState(new Set());
+  const [page, setPage] = useState(0);
+  const [rowsPerPage] = useState(10);
+  const [manualPhoneInput, setManualPhoneInput] = useState('');
+  const [manualEntries, setManualEntries] = useState(() => {
+    try {
+      const raw = localStorage.getItem('zt_manual_phones');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
 
   const activeAccountId = String(activeAccount?.id || activeAccount?.userId || '');
   const accountFriendCollections = activeAccountId && friendCollections[activeAccountId]
@@ -334,10 +346,28 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       })
   );
 
-  const contactRows = filteredFriendRows.map((friend) => ({
-    ...friend,
-    classification: friend.zid,
-  })).filter((friend) => !hiddenContactIds.has(String(friend.zid || '').trim()));
+  const contactRows = [
+    ...manualEntries
+      .filter((entry) => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        return String(entry.phone || '').includes(q) || String(entry.zid || '').includes(q);
+      })
+      .map((entry, idx) => ({
+        key: `manual_${entry.phone || entry.zid || idx}`,
+        rowKey: `manual_${entry.phone || entry.zid || idx}`,
+        name: '',
+        avatar: '',
+        phone: entry.phone || '—',
+        zid: entry.zid || entry.phone || '—',
+        classification: entry.zid || entry.phone || '—',
+        isManual: true,
+      })),
+    ...filteredFriendRows.map((friend) => ({
+      ...friend,
+      classification: friend.zid,
+    })).filter((friend) => !hiddenContactIds.has(String(friend.zid || '').trim())),
+  ];
 
   const groupLibraryRows = dedupeRows(
     groupLibraryEntries
@@ -375,6 +405,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
   const activeRows = tabRows[activeTab] || [];
   const activeCount = activeRows.length;
+  const paginatedRows = activeRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const allRowsSelected = activeCount > 0 && activeRows.every((row, idx) => selectedRows.has(buildRowKey(row, idx)));
   const controlRows = getTabControlRows(activeTab);
   const showCollectionFilter = TABS_WITH_COLLECTION_FILTER.has(activeTab);
@@ -423,6 +454,26 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     } else {
       setSelectedRows(new Set());
     }
+  };
+
+  const addManualEntry = () => {
+    const raw = manualPhoneInput.trim();
+    if (!raw) return;
+    const lines = raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+    const existing = new Set(manualEntries.map((e) => e.phone));
+    const newEntries = lines.filter((l) => !existing.has(l)).map((phone) => ({ phone, zid: phone }));
+    if (newEntries.length === 0) return;
+    const updated = [...newEntries, ...manualEntries];
+    setManualEntries(updated);
+    try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+    setManualPhoneInput('');
+  };
+
+  const removeManualEntries = () => {
+    const updated = manualEntries.filter((entry) => !selectedRows.has(`manual_${entry.phone || entry.zid}`));
+    setManualEntries(updated);
+    try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
+    setSelectedRows(new Set());
   };
 
   const handleSelectRow = (row, idx) => {
@@ -484,6 +535,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         onChange={(_, value) => {
           setActiveTab(value);
           setSelectedRows(new Set());
+          setPage(0);
           if (value !== 0 && value !== 1) setSelectedTag('');
         }}
         variant="scrollable"
@@ -558,20 +610,20 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Checkbox
           size="small"
           checked={allRowsSelected}
           onChange={(e) => handleSelectAll(e.target.checked)}
         />
-        <Typography variant="body2" fontWeight={600}>
+        <Typography variant="caption" fontWeight={600}>
           {activeCount}
         </Typography>
         <TextField
           size="small"
-          placeholder={searchPlaceholder}
+          placeholder={activeTab === 3 ? 'Tìm theo số điện thoại/ZID' : searchPlaceholder}
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -579,78 +631,103 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               </InputAdornment>
             ),
           }}
-          sx={{ flex: 1, ml: 1 }}
+          sx={{ flex: 1, ml: 1, '& .MuiInputBase-input': { fontSize: '0.8rem', py: 0.8 } }}
         />
+        {activeTab === 3 && (
+          <>
+            <Button size="small" variant="outlined" onClick={addManualEntry} sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 52, py: 0.5 }}>
+              Thêm
+            </Button>
+            <Button size="small" variant="outlined" color="error" onClick={removeManualEntries} disabled={selectedRows.size === 0}
+              sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 44, py: 0.5 }}>
+              Xóa
+            </Button>
+          </>
+        )}
       </Box>
 
+      {activeTab === 3 && (
+        <TextField
+          size="small"
+          multiline
+          minRows={2}
+          maxRows={4}
+          placeholder="Nhập số điện thoại hoặc ZID (mỗi dòng 1 số, hoặc ngăn bằng dấu phẩy)"
+          value={manualPhoneInput}
+          onChange={(e) => setManualPhoneInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addManualEntry(); } }}
+          fullWidth
+          sx={{ mb: 1, '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
+        />
+      )}
+
       <TableContainer>
-        <Table size="small">
+        <Table size="small" sx={{ '& .MuiTableCell-root': { py: 0.5, px: 1, fontSize: '0.78rem' } }}>
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox" />
-              <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>
+              <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
                 Tên
                 <SortIcon fontSize="inherit" sx={{ ml: 0.5, verticalAlign: 'middle', opacity: 0.5 }} />
               </TableCell>
-              <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                {activeTab === 1 ? 'Thành viên' : activeTab === 2 ? 'Thông tin' : activeTab === 4 || activeTab === 5 ? 'Thời gian' : 'Số điện thoại'}
+              <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
+                {activeTab === 1 ? 'Thành viên' : activeTab === 2 ? 'Thông tin' : activeTab === 3 ? 'Số điện thoại/ Zalo ID' : activeTab === 4 || activeTab === 5 ? 'Thời gian' : 'Số điện thoại'}
               </TableCell>
-              <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                {activeTab === 2 ? 'Mô tả' : activeTab === 3 ? 'ZID' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
-              </TableCell>
+              {activeTab !== 3 && (
+                <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
+                  {activeTab === 2 ? 'Mô tả' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
+                </TableCell>
+              )}
             </TableRow>
           </TableHead>
           <TableBody>
-            {activeRows.map((row, idx) => (
-              <TableRow key={buildRowKey(row, idx)} hover selected={selectedRows.has(buildRowKey(row, idx))}>
+            {paginatedRows.map((row, idx) => {
+              const globalIdx = page * rowsPerPage + idx;
+              return (
+              <TableRow key={buildRowKey(row, globalIdx)} hover selected={selectedRows.has(buildRowKey(row, globalIdx))}>
                 <TableCell padding="checkbox">
                   <Checkbox
                     size="small"
-                    checked={selectedRows.has(buildRowKey(row, idx))}
-                    onChange={() => handleSelectRow(row, idx)}
+                    checked={selectedRows.has(buildRowKey(row, globalIdx))}
+                    onChange={() => handleSelectRow(row, globalIdx)}
                   />
                 </TableCell>
                 <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Avatar src={row.avatar} sx={{ width: 28, height: 28 }}>
-                      {(row.name || '?')[0]}
-                    </Avatar>
-                    <Typography variant="body2">{row.name}</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    {row.name ? (
+                      <>
+                        <Avatar src={row.avatar} sx={{ width: 24, height: 24, fontSize: '0.7rem' }}>
+                          {(row.name || '?')[0]}
+                        </Avatar>
+                        <Typography variant="caption">{row.name}</Typography>
+                      </>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">—</Typography>
+                    )}
                   </Box>
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2" color="text.secondary">
-                    {row.phone || '—'}
+                  <Typography variant="caption" color="text.secondary">
+                    {activeTab === 3 ? (row.phone || row.zid || '—') : (row.phone || '—')}
                   </Typography>
                 </TableCell>
+                {activeTab !== 3 && (
                 <TableCell>
                   {activeTab === 0 ? (
                     <FormControl size="small" fullWidth>
                       <Select
                         value={normalizeCollection(row.classification)}
-                        onChange={(event) => handleCollectionChange(row.rowKey || buildRowKey(row, idx), event.target.value)}
+                        onChange={(event) => handleCollectionChange(row.rowKey || buildRowKey(row, globalIdx), event.target.value)}
                         displayEmpty
                         renderValue={(value) => <CollectionPill value={value} muted={value === DEFAULT_FRIEND_COLLECTION} />}
                         sx={{
-                          minWidth: 180,
-                          borderRadius: 3,
+                          minWidth: 140,
+                          borderRadius: 2,
                           bgcolor: '#fff',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#d8e0ea',
-                          },
-                          '& .MuiSelect-select': {
-                            py: 1,
-                          },
+                          '& .MuiOutlinedInput-notchedOutline': { borderColor: '#d8e0ea' },
+                          '& .MuiSelect-select': { py: 0.5, fontSize: '0.78rem' },
                         }}
-                        MenuProps={{
-                          PaperProps: {
-                            sx: {
-                              mt: 1,
-                              borderRadius: 3,
-                              p: 1,
-                            },
-                          },
-                        }}
+                        MenuProps={{ PaperProps: { sx: { mt: 1, borderRadius: 2, p: 0.5 } } }}
                       >
                         <MenuItem value={DEFAULT_FRIEND_COLLECTION}>
                           <CollectionPill value={DEFAULT_FRIEND_COLLECTION} muted />
@@ -666,29 +743,17 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                     <FormControl size="small" fullWidth>
                       <Select
                         value={normalizeCollection(row.classification)}
-                        onChange={(event) => handleGroupCollectionChange(row.rowKey || buildRowKey(row, idx), event.target.value)}
+                        onChange={(event) => handleGroupCollectionChange(row.rowKey || buildRowKey(row, globalIdx), event.target.value)}
                         displayEmpty
                         renderValue={(value) => <CollectionPill value={value} muted={value === DEFAULT_FRIEND_COLLECTION} />}
                         sx={{
-                          minWidth: 180,
-                          borderRadius: 3,
+                          minWidth: 140,
+                          borderRadius: 2,
                           bgcolor: '#fff',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#d8e0ea',
-                          },
-                          '& .MuiSelect-select': {
-                            py: 1,
-                          },
+                          '& .MuiOutlinedInput-notchedOutline': { borderColor: '#d8e0ea' },
+                          '& .MuiSelect-select': { py: 0.5, fontSize: '0.78rem' },
                         }}
-                        MenuProps={{
-                          PaperProps: {
-                            sx: {
-                              mt: 1,
-                              borderRadius: 3,
-                              p: 1,
-                            },
-                          },
-                        }}
+                        MenuProps={{ PaperProps: { sx: { mt: 1, borderRadius: 2, p: 0.5 } } }}
                       >
                         <MenuItem value={DEFAULT_FRIEND_COLLECTION}>
                           <CollectionPill value={DEFAULT_FRIEND_COLLECTION} muted />
@@ -700,19 +765,34 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                         ))}
                       </Select>
                     </FormControl>
-                  ) : activeTab === 2 || activeTab === 3 ? (
-                    <Typography variant="body2" color="text.secondary">
+                  ) : activeTab === 2 ? (
+                    <Typography variant="caption" color="text.secondary">
                       {row.classification || '—'}
                     </Typography>
                   ) : (
-                    <Chip label={row.classification || 'Chưa phân loại'} size="small" variant="outlined" />
+                    <Chip label={row.classification || 'Chưa phân loại'} size="small" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
                   )}
                 </TableCell>
+                )}
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {activeCount > rowsPerPage && (
+        <TablePagination
+          component="div"
+          count={activeCount}
+          page={page}
+          onPageChange={(_, newPage) => setPage(newPage)}
+          rowsPerPage={rowsPerPage}
+          rowsPerPageOptions={[]}
+          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
+          sx={{ '& .MuiTablePagination-toolbar': { minHeight: 36, px: 1 }, '& .MuiTablePagination-displayedRows': { fontSize: '0.75rem' } }}
+        />
+      )}
 
       {activeCount === 0 && (
         <Box
