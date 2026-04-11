@@ -499,8 +499,6 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       return;
     }
 
-    if (groupMembersError) return;
-
     let cancelled = false;
     setGroupMembersLoading(true);
     setGroupMembersError('');
