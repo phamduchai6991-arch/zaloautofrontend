@@ -25,6 +25,7 @@ import {
   Typography,
 } from '@mui/material';
 import {
+  ArrowBack as ArrowBackIcon,
   ArrowUpward as SortIcon,
   CollectionsBookmark as LibraryIcon,
   Delete as DeleteIcon,
@@ -161,6 +162,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       return raw ? JSON.parse(raw) : [];
     } catch { return []; }
   });
+  const [drilledGroup, setDrilledGroup] = useState(null);
 
   const activeAccountId = String(activeAccount?.id || activeAccount?.userId || '');
   const accountFriendCollections = activeAccountId && friendCollections[activeAccountId]
@@ -394,6 +396,49 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       })
   );
 
+  const drilledMemberRows = useMemo(() => {
+    if (!drilledGroup) return [];
+    const memberIds = Array.isArray(drilledGroup.source?.memberIds) ? drilledGroup.source.memberIds : [];
+    const selfId = String(activeAccount?.userId || '').trim();
+    const friendMap = new Map();
+    (Array.isArray(friends) ? friends : []).forEach((friend) => {
+      const id = String(friend?.userId || friend?.globalId || '').trim();
+      if (id) friendMap.set(id, friend);
+    });
+    const existingFriendIds = new Set(friendMap.keys());
+
+    const rows = memberIds
+      .map((memberId) => {
+        const zid = String(memberId || '').trim();
+        if (!zid || zid === selfId) return null;
+        const friend = friendMap.get(zid);
+        const isFriend = existingFriendIds.has(zid);
+        return {
+          key: zid,
+          rowKey: zid,
+          name: friend?.displayName || `ZID ${zid}`,
+          avatar: friend?.avatar || '',
+          phone: friend?.phoneNumber || '—',
+          zid,
+          classification: isFriend ? 'Bạn bè' : 'Chưa kết bạn',
+          isFriend,
+          sourceGroupName: drilledGroup.name || 'Nhóm',
+        };
+      })
+      .filter(Boolean);
+
+    if (!searchQuery) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((row) =>
+      row.name.toLowerCase().includes(q)
+      || String(row.phone).toLowerCase().includes(q)
+      || row.zid.toLowerCase().includes(q)
+      || row.classification.toLowerCase().includes(q)
+    );
+  }, [drilledGroup, friends, activeAccount?.userId, searchQuery]);
+
+  const isDrilledIntoMembers = Boolean(drilledGroup) && (activeTab === 1 || activeTab === 2);
+
   const tabRows = {
     0: filteredFriendRows,
     1: filteredGroupRows,
@@ -403,12 +448,12 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     5: scheduledInviteRows,
   };
 
-  const activeRows = tabRows[activeTab] || [];
+  const activeRows = isDrilledIntoMembers ? drilledMemberRows : (tabRows[activeTab] || []);
   const activeCount = activeRows.length;
   const paginatedRows = activeRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   const allRowsSelected = activeCount > 0 && activeRows.every((row, idx) => selectedRows.has(buildRowKey(row, idx)));
   const controlRows = getTabControlRows(activeTab);
-  const showCollectionFilter = TABS_WITH_COLLECTION_FILTER.has(activeTab);
+  const showCollectionFilter = TABS_WITH_COLLECTION_FILTER.has(activeTab) && !isDrilledIntoMembers;
   const searchPlaceholder = TAB_SEARCH_PLACEHOLDERS[activeTab] || 'Tìm kiếm';
 
   const emptyStateByTab = {
@@ -442,12 +487,15 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     if (!onSelectionChange) return;
     onSelectionChange({
       activeTab,
-      activeLabel: DATA_TABS[activeTab]?.label || 'Dữ liệu',
+      activeLabel: isDrilledIntoMembers
+        ? `Thành viên ${drilledGroup?.name || 'nhóm'}`
+        : (DATA_TABS[activeTab]?.label || 'Dữ liệu'),
       allItems: activeRows,
       selectedItems: activeRows.filter((row, idx) => selectedRows.has(buildRowKey(row, idx))),
       viewState,
+      isDrilledIntoMembers,
     });
-  }, [activeTab, activeRows.length, selectedRows.size, viewState, onSelectionChange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, activeRows.length, selectedRows.size, viewState, isDrilledIntoMembers, onSelectionChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectAll = (checked) => {
     if (checked) {
@@ -537,6 +585,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
           setActiveTab(value);
           setSelectedRows(new Set());
           setPage(0);
+          setDrilledGroup(null);
           if (value !== 0 && value !== 1) setSelectedTag('');
         }}
         variant="scrollable"
@@ -611,6 +660,25 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         </Alert>
       )}
 
+      {isDrilledIntoMembers && drilledGroup && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, p: 1, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+          <IconButton size="small" onClick={() => { setDrilledGroup(null); setSelectedRows(new Set()); setPage(0); }}>
+            <ArrowBackIcon fontSize="small" />
+          </IconButton>
+          <Avatar src={drilledGroup.avatar} sx={{ width: 28, height: 28, fontSize: '0.75rem' }}>
+            {(drilledGroup.name || '?')[0]}
+          </Avatar>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={700} noWrap>
+              Nhóm đang chọn: {drilledGroup.name}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {drilledMemberRows.length} thành viên
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Checkbox
           size="small"
@@ -672,11 +740,11 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                 <SortIcon fontSize="inherit" sx={{ ml: 0.5, verticalAlign: 'middle', opacity: 0.5 }} />
               </TableCell>
               <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
-                {activeTab === 1 ? 'Thành viên' : activeTab === 2 ? 'Thông tin' : activeTab === 3 ? 'Số điện thoại/ Zalo ID' : activeTab === 4 || activeTab === 5 ? 'Thời gian' : 'Số điện thoại'}
+                {isDrilledIntoMembers ? 'Zalo ID' : (activeTab === 1 ? 'Thành viên' : activeTab === 2 ? 'Thông tin' : activeTab === 3 ? 'Số điện thoại/ Zalo ID' : activeTab === 4 || activeTab === 5 ? 'Thời gian' : 'Số điện thoại')}
               </TableCell>
               {activeTab !== 3 && (
                 <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
-                  {activeTab === 2 ? 'Mô tả' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
+                  {isDrilledIntoMembers ? 'Trạng thái' : (activeTab === 2 ? 'Mô tả' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại')}
                 </TableCell>
               )}
             </TableRow>
@@ -694,7 +762,21 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                   />
                 </TableCell>
                 <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      ...(!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? { cursor: 'pointer', '&:hover': { color: 'primary.main' } } : {}),
+                    }}
+                    onClick={!isDrilledIntoMembers && (activeTab === 1 || activeTab === 2) ? (e) => {
+                      e.stopPropagation();
+                      setDrilledGroup(row);
+                      setSelectedRows(new Set());
+                      setPage(0);
+                      setSearchQuery('');
+                    } : undefined}
+                  >
                     {row.name ? (
                       <>
                         <Avatar src={row.avatar} sx={{ width: 24, height: 24, fontSize: '0.7rem' }}>
@@ -709,12 +791,20 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                 </TableCell>
                 <TableCell>
                   <Typography variant="caption" color="text.secondary">
-                    {activeTab === 3 ? (row.phone || row.zid || '—') : (row.phone || '—')}
+                    {isDrilledIntoMembers ? (row.zid || '—') : activeTab === 3 ? (row.phone || row.zid || '—') : (row.phone || '—')}
                   </Typography>
                 </TableCell>
                 {activeTab !== 3 && (
                 <TableCell>
-                  {activeTab === 0 ? (
+                  {isDrilledIntoMembers ? (
+                    <Chip
+                      label={row.classification || '—'}
+                      size="small"
+                      variant="outlined"
+                      color={row.isFriend ? 'success' : 'default'}
+                      sx={{ fontSize: '0.7rem', height: 22 }}
+                    />
+                  ) : activeTab === 0 ? (
                     <FormControl size="small" fullWidth>
                       <Select
                         value={normalizeCollection(row.classification)}

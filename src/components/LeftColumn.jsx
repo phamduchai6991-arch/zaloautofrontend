@@ -103,17 +103,17 @@ function isGenericAccountName(value) {
   return !text || text === 'tài khoản zalo';
 }
 
-function buildInviteTargets(selectedItems, activeTab, activeAccount) {
+function buildInviteTargets(selectedItems, activeTab, activeAccount, isDrilledIntoMembers) {
   if (!Array.isArray(selectedItems) || selectedItems.length === 0) return [];
 
-  if (activeTab !== 1 && activeTab !== 2) {
+  if (isDrilledIntoMembers || (activeTab !== 1 && activeTab !== 2)) {
     return selectedItems.map((item) => ({
       key: item.key || item.zid,
       name: item.name,
       avatar: item.avatar,
       phone: item.phone,
       zid: item.zid || item.classification || '—',
-      sourceTab: item.sourceTab,
+      sourceTab: item.sourceTab || item.sourceGroupName,
     }));
   }
 
@@ -145,10 +145,10 @@ function buildInviteTargets(selectedItems, activeTab, activeAccount) {
   return Array.from(dedupedTargets.values());
 }
 
-async function resolveInviteTargets({ selectedItems, activeTab, activeAccount }) {
-  const targets = buildInviteTargets(selectedItems, activeTab, activeAccount);
+async function resolveInviteTargets({ selectedItems, activeTab, activeAccount, isDrilledIntoMembers }) {
+  const targets = buildInviteTargets(selectedItems, activeTab, activeAccount, isDrilledIntoMembers);
 
-  if (activeTab !== 1 && activeTab !== 2) {
+  if (isDrilledIntoMembers || (activeTab !== 1 && activeTab !== 2)) {
     return {
       targets,
       totals: {
@@ -635,7 +635,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     availablePullGroupFriends.filter((friend) => pullGroupFriendIds.includes(String(friend.zid || '')))
   ), [availablePullGroupFriends, pullGroupFriendIds]);
   const selectedGroupRowForPull = selection?.activeTab === 1 && selectedItems.length === 1 ? selectedItems[0] : null;
-  const isPullGroupMode = pullGroupEnabled && selection?.activeTab === 1;
+  const isPullGroupMode = pullGroupEnabled && selection?.activeTab === 1 && !selection?.isDrilledIntoMembers;
   const visiblePullGroupFriendIds = filteredPullGroupFriends.map((friend) => String(friend.zid || '')).filter(Boolean);
   const allPullGroupVisibleSelected = visiblePullGroupFriendIds.length > 0 && visiblePullGroupFriendIds.every((id) => pullGroupFriendIds.includes(id));
 
@@ -932,12 +932,14 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     const scheduledDate = scheduleAt ? new Date(scheduleAt) : null;
     const isScheduled = Boolean(scheduledDate && scheduledDate.getTime() > now.getTime());
     const delayWindow = `${delayFrom}-${delayTo}s`;
-    const messageTargetsAreGroups = selection?.activeTab === 1 || selection?.activeTab === 2;
+    const isDrilledIntoMembers = Boolean(selection?.isDrilledIntoMembers);
+    const messageTargetsAreGroups = !isDrilledIntoMembers && (selection?.activeTab === 1 || selection?.activeTab === 2);
     const inviteResolution = ketBanEnabled
       ? await resolveInviteTargets({
           selectedItems,
           activeTab: selection?.activeTab,
           activeAccount,
+          isDrilledIntoMembers,
         })
       : { targets: [], totals: null, summaries: [] };
     const inviteTargets = inviteResolution.targets || [];

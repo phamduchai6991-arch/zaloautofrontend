@@ -65,6 +65,7 @@ export default function ReachPage() {
     allItems: [],
     selectedItems: [],
     viewState: {},
+    isDrilledIntoMembers: false,
   });
   const [campaignState, setCampaignState] = useState(loadCampaignState);
 
