@@ -642,6 +642,12 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
   }, [isPullGroupMode]);
 
+  // Turn off Kết bạn / Nhắn tin when switching to tabs that don't support them
+  useEffect(() => {
+    if (!canInviteFromCurrentTab) setKetBanEnabled(false);
+    if (!canMessageFromCurrentTab) setNhanTinEnabled(false);
+  }, [canInviteFromCurrentTab, canMessageFromCurrentTab]);
+
   const togglePullGroupFriend = (friendId) => {
     const normalizedId = String(friendId || '');
     if (!normalizedId) return;
@@ -1661,7 +1667,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         </DialogActions>
       </Dialog>
 
-      {!isPullGroupMode && (
+      {!isPullGroupMode && canInviteFromCurrentTab && (
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Typography variant="h6" fontWeight={700}>
@@ -1714,7 +1720,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       </Box>
       )}
 
-      {!isPullGroupMode && (
+      {!isPullGroupMode && canMessageFromCurrentTab && (
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Typography variant="h6" fontWeight={700}>
