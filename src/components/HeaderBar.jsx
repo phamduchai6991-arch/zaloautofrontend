@@ -86,7 +86,7 @@ export default function HeaderBar() {
             height: 32,
           }}
         >
-          v1.0.0
+          Tải và cài extension để web hoạt động trước · v1.0.0
         </Button>
 
         {/* Flag */}
