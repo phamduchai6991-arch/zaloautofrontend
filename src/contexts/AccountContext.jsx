@@ -169,13 +169,23 @@ export function AccountProvider({ children }) {
   const [receivedFriendRequests, setReceivedFriendRequests] = useState([]);
   const [serverAccountCount, setServerAccountCount] = useState(0);
 
+  const refreshServerAccountCount = useCallback(async () => {
+    if (!googleUserId) {
+      setServerAccountCount(0);
+      return 0;
+    }
+
+    const list = await serverGetAccounts(googleUserId);
+    const count = Array.isArray(list) ? list.length : 0;
+    setServerAccountCount(count);
+    return count;
+  }, [googleUserId]);
+
   // Load server-side registered account count on login
   useEffect(() => {
     if (!googleUserId) return;
-    serverGetAccounts(googleUserId).then((list) => {
-      setServerAccountCount(list.length);
-    });
-  }, [googleUserId]);
+    refreshServerAccountCount();
+  }, [googleUserId, refreshServerAccountCount]);
 
   const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
   const syncing = isBusySyncPhase(syncState.phase);
@@ -361,7 +371,7 @@ export function AccountProvider({ children }) {
             zaloPhone: incomingAccount.phone,
           }).then((result) => {
             if (result?.ok) {
-              serverGetAccounts(googleUserId).then((list) => setServerAccountCount(list.length));
+              refreshServerAccountCount();
             }
           });
         }
@@ -676,6 +686,7 @@ export function AccountProvider({ children }) {
     sentFriendRequests,
     receivedFriendRequests,
     serverAccountCount,
+    refreshServerAccountCount,
     addAccount,
     confirmPendingSync,
     cancelPendingSync,

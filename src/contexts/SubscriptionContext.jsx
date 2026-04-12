@@ -73,7 +73,7 @@ export function SubscriptionProvider({ children }) {
     if (!user?.sub) {
       setSubscription(null);
       setLoading(false);
-      return;
+      return null;
     }
 
     setLoading(true);
@@ -84,12 +84,16 @@ export function SubscriptionProvider({ children }) {
         const nextSubscription = data.subscription || null;
         setSubscription(nextSubscription);
         writeCachedSubscription(user.sub, nextSubscription);
+        return nextSubscription;
       } else {
         setSubscription(null);
         writeCachedSubscription(user.sub, null);
+        return null;
       }
     } catch {
-      setSubscription((prev) => prev || getCachedSubscription(user.sub));
+      const fallbackSubscription = getCachedSubscription(user.sub);
+      setSubscription((prev) => prev || fallbackSubscription);
+      return fallbackSubscription;
     } finally {
       setLoading(false);
     }
