@@ -396,9 +396,9 @@ export default function GuidePage() {
         Hướng Dẫn Sử Dụng
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        AutoZalo v1.0.0 — Công cụ quản lý Zalo đa tài khoản
+        AutoZalo v1.0.1 — Công cụ quản lý Zalo đa tài khoản
       </Typography>
-      <Chip label="v1.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
+      <Chip label="v1.0.1" size="small" sx={{ mb: 4, fontWeight: 600 }} />
 
       <Stack spacing={1.5}>
         {SECTIONS.map((section) => (

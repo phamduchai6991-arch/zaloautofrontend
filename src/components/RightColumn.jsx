@@ -65,7 +65,7 @@ import {
   loadGroupLibraryEntries,
   subscribeGroupLibraryChange,
 } from '../utils/reachGroupLibraryStore';
-import { resolveGroupInviteTargetsViaLocalService, findUserByPhoneViaLocalService } from '../utils/localZaloService';
+import { resolveGroupMembersViaExtension, resolveUserTargetsViaExtension } from '../utils/extensionBridge';
 
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
 const GROUP_COLLECTIONS_KEY = 'zt_group_collections';
@@ -514,19 +514,22 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     setGroupMembersLoading(true);
     setGroupMembersError('');
 
-    resolveGroupInviteTargetsViaLocalService({
+    resolveGroupMembersViaExtension({
       account: activeAccount,
       groups: [{
         groupId,
         zid: groupId,
         name: drilledGroup.name || 'Nhóm',
       }],
-      includeAllMembers: true,
     })
       .then((response) => {
         if (cancelled) return;
-        const nextRows = Array.isArray(response?.membersByGroup?.[groupId])
-          ? response.membersByGroup[groupId].map((member, index) => ({
+        if (!response?.ok) {
+          throw new Error(response?.error || 'Extension không thể tải danh sách thành viên nhóm.');
+        }
+        const membersByGroup = response?.data?.membersByGroup || response?.membersByGroup || {};
+        const nextRows = Array.isArray(membersByGroup[groupId])
+          ? membersByGroup[groupId].map((member, index) => ({
               key: member?.key || `${groupId}_${member?.zid || index}`,
               rowKey: String(member?.zid || member?.key || index),
               name: member?.name || 'Không rõ tên',
@@ -547,7 +550,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       })
       .catch((error) => {
         if (cancelled) return;
-        setGroupMembersError(error instanceof Error ? error.message : 'Không thể tải danh sách thành viên nhóm.');
+        setGroupMembersError(error instanceof Error ? error.message : 'Extension không thể tải danh sách thành viên nhóm.');
       })
       .finally(() => {
         if (cancelled) return;
@@ -634,33 +637,38 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
     setPhoneLookupLoading(true);
     try {
-      const response = await findUserByPhoneViaLocalService({
+      const response = await resolveUserTargetsViaExtension({
         account: activeAccount,
-        phones: newPhones,
+        queries: newPhones,
       });
+      if (!response?.ok) {
+        throw new Error(response?.error || 'Extension không thể tra cứu SĐT/ZID.');
+      }
       const resultMap = new Map();
-      (response?.results || []).forEach((r) => { resultMap.set(r.phone, r); });
+      (response?.data?.results || response?.results || []).forEach((r) => {
+        resultMap.set(r.query || r.phone, r);
+      });
 
-      const resolved = newPhones.map((phone) => {
-        const r = resultMap.get(phone);
+      const resolved = newPhones.map((query) => {
+        const r = resultMap.get(query);
         if (r?.found) {
           return {
-            phone,
-            zid: r.uid || phone,
+            phone: query,
+            zid: r.uid || query,
             name: r.displayName || r.zaloName || '',
             avatar: r.avatar || '',
             found: true,
           };
         }
-        return { phone, zid: phone, name: '', avatar: '', found: false, error: r?.error || '' };
+        return { phone: query, zid: query, name: '', avatar: '', found: false, error: r?.error || '' };
       });
 
       const updated = [...resolved, ...manualEntries];
       setManualEntries(updated);
       try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
     } catch {
-      // Fallback: store raw entries if service fails
-      const rawEntries = newPhones.map((phone) => ({ phone, zid: phone }));
+      // Fallback: keep raw entries if extension lookup fails
+      const rawEntries = newPhones.map((query) => ({ phone: query, zid: query }));
       const updated = [...rawEntries, ...manualEntries];
       setManualEntries(updated);
       try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}

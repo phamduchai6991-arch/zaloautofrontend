@@ -245,6 +245,32 @@ export function zFetch(payload) {
   return requestExtension('Z_FETCH', payload, 70000);
 }
 
+export function resolveGroupMembersViaExtension(payload) {
+  return zFetch({
+    account: payload?.account,
+    request: {
+      method: 'resolveGroupMembers',
+      args: {
+        groups: Array.isArray(payload?.groups) ? payload.groups : [],
+        accountUserId: payload?.account?.userId || '',
+      },
+    },
+  });
+}
+
+export function resolveUserTargetsViaExtension(payload) {
+  return zFetch({
+    account: payload?.account,
+    request: {
+      method: 'resolveUserTargets',
+      args: {
+        queries: Array.isArray(payload?.queries) ? payload.queries : [],
+        accountUserId: payload?.account?.userId || '',
+      },
+    },
+  });
+}
+
 /** Subscribe to real-time incoming Zalo messages. Returns unsubscribe fn. */
 export function onIncomingMessages(callback) {
   return onExtensionMessage((msg) => {
