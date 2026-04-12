@@ -65,6 +65,7 @@ import {
   loadGroupLibraryEntries,
   subscribeGroupLibraryChange,
 } from '../utils/reachGroupLibraryStore';
+import { checkLocalZaloService, resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
 import { resolveGroupMembersViaExtension, resolveUserTargetsViaExtension } from '../utils/extensionBridge';
 
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
@@ -514,43 +515,76 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     setGroupMembersLoading(true);
     setGroupMembersError('');
 
-    resolveGroupMembersViaExtension({
-      account: activeAccount,
-      groups: [{
+    const loadHiddenMembers = async () => {
+      const groupPayload = [{
         groupId,
         zid: groupId,
         name: drilledGroup.name || 'Nhóm',
-      }],
-    })
-      .then((response) => {
-        if (cancelled) return;
-        if (!response?.ok) {
-          throw new Error(response?.error || 'Extension không thể tải danh sách thành viên nhóm.');
-        }
-        const membersByGroup = response?.data?.membersByGroup || response?.membersByGroup || {};
-        const nextRows = Array.isArray(membersByGroup[groupId])
-          ? membersByGroup[groupId].map((member, index) => ({
-              key: member?.key || `${groupId}_${member?.zid || index}`,
-              rowKey: String(member?.zid || member?.key || index),
-              name: member?.name || 'Không rõ tên',
-              avatar: member?.avatar || '',
-              zid: member?.zid || '—',
-              role: member?.role || 'Thành viên',
-              relationLabel: member?.relationLabel || 'Chưa kết bạn',
-              classification: member?.relationLabel || 'Chưa kết bạn',
-              isFriend: Boolean(member?.isFriend),
-              sourceGroupName: drilledGroup.name || 'Nhóm',
-            }))
-          : [];
+      }];
 
-        setGroupMembersCache((prev) => ({
-          ...prev,
-          [groupId]: nextRows,
-        }));
-      })
+      let response = null;
+      let lastError = null;
+
+      try {
+        const localServiceReady = await checkLocalZaloService(1200);
+        if (localServiceReady) {
+          response = await resolveGroupInviteTargetsViaLocalService({
+            account: activeAccount,
+            groups: groupPayload,
+            includeAllMembers: true,
+          });
+        }
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (!response) {
+        try {
+          response = await resolveGroupMembersViaExtension({
+            account: activeAccount,
+            groups: groupPayload,
+            allowCreateTab: false,
+          });
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!response?.ok) {
+        throw new Error(
+          response?.error
+            || lastError?.message
+            || 'Không thể tải danh sách thành viên nhóm. Nếu không dùng local service, hãy mở sẵn tab Zalo đúng tài khoản trước khi bật Hiển thị thành viên ẩn.'
+        );
+      }
+
+      const membersByGroup = response?.data?.membersByGroup || response?.membersByGroup || {};
+      const nextRows = Array.isArray(membersByGroup[groupId])
+        ? membersByGroup[groupId].map((member, index) => ({
+            key: member?.key || `${groupId}_${member?.zid || index}`,
+            rowKey: String(member?.zid || member?.key || index),
+            name: member?.name || 'Không rõ tên',
+            avatar: member?.avatar || '',
+            zid: member?.zid || '—',
+            role: member?.role || 'Thành viên',
+            relationLabel: member?.relationLabel || 'Chưa kết bạn',
+            classification: member?.relationLabel || 'Chưa kết bạn',
+            isFriend: Boolean(member?.isFriend),
+            sourceGroupName: drilledGroup.name || 'Nhóm',
+          }))
+        : [];
+
+      if (cancelled) return;
+      setGroupMembersCache((prev) => ({
+        ...prev,
+        [groupId]: nextRows,
+      }));
+    };
+
+    loadHiddenMembers()
       .catch((error) => {
         if (cancelled) return;
-        setGroupMembersError(error instanceof Error ? error.message : 'Extension không thể tải danh sách thành viên nhóm.');
+        setGroupMembersError(error instanceof Error ? error.message : 'Không thể tải danh sách thành viên nhóm.');
       })
       .finally(() => {
         if (cancelled) return;

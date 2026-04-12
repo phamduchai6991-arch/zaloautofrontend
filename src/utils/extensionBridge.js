@@ -248,6 +248,9 @@ export function zFetch(payload) {
 export function resolveGroupMembersViaExtension(payload) {
   return zFetch({
     account: payload?.account,
+    options: {
+      allowCreateTab: payload?.allowCreateTab !== false,
+    },
     request: {
       method: 'resolveGroupMembers',
       args: {
