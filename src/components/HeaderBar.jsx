@@ -26,15 +26,17 @@ import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 export default function HeaderBar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { planKey, isActive } = useSubscription();
+  const { planKey, isActive, loading } = useSubscription();
   const [anchorEl, setAnchorEl] = useState(null);
 
   const planLabel = user
-    ? (isActive ? (PLAN_LABELS[planKey] || String(planKey || '').toUpperCase()) : 'FREE')
+    ? (loading && !planKey
+      ? '...'
+      : (isActive ? (PLAN_LABELS[planKey] || String(planKey || '').toUpperCase()) : 'FREE'))
     : 'LOGIN';
 
   const planColor = user
-    ? (isActive ? '#f59e0b' : '#637381')
+    ? (loading && !planKey ? '#9aa5b1' : (isActive ? '#f59e0b' : '#637381'))
     : '#637381';
 
   const handleAvatarClick = (e) => {

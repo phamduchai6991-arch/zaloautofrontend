@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useAuth } from './AuthContext';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+const SUBSCRIPTION_CACHE_KEY = 'autozalo_subscription_cache';
 
 export const PLAN_LIMITS = {
   basic: 1,
@@ -18,27 +19,77 @@ export const PLAN_LABELS = {
 const SubscriptionContext = createContext(null);
 const SUBSCRIPTION_CHANGED_EVENT = 'autozalo:subscription-changed';
 
+function loadSubscriptionCache() {
+  try {
+    const raw = localStorage.getItem(SUBSCRIPTION_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getCachedSubscription(userId) {
+  if (!userId) return null;
+  const cache = loadSubscriptionCache();
+  return cache[userId] || null;
+}
+
+function writeCachedSubscription(userId, subscription) {
+  if (!userId) return;
+  const cache = loadSubscriptionCache();
+  if (subscription) {
+    cache[userId] = subscription;
+  } else {
+    delete cache[userId];
+  }
+
+  try {
+    localStorage.setItem(SUBSCRIPTION_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export function SubscriptionProvider({ children }) {
   const { user } = useAuth();
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (!user?.sub) {
+      setSubscription(null);
+      setLoading(false);
+      return;
+    }
+
+    const cached = getCachedSubscription(user.sub);
+    setSubscription(cached);
+    setLoading(true);
+  }, [user?.sub]);
+
   const fetchSubscription = useCallback(async () => {
     if (!user?.sub) {
       setSubscription(null);
+      setLoading(false);
       return;
     }
+
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/payment/subscription/${encodeURIComponent(user.sub)}`);
       if (res.ok) {
         const data = await res.json();
-        setSubscription(data.subscription || null);
+        const nextSubscription = data.subscription || null;
+        setSubscription(nextSubscription);
+        writeCachedSubscription(user.sub, nextSubscription);
       } else {
         setSubscription(null);
+        writeCachedSubscription(user.sub, null);
       }
     } catch {
-      setSubscription(null);
+      setSubscription((prev) => prev || getCachedSubscription(user.sub));
     } finally {
       setLoading(false);
     }
