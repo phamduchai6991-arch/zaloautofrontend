@@ -65,6 +65,7 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
   const [error, setError] = useState('');
   const pollRef = useRef(null);
   const pollStartedAtRef = useRef(0);
+  const pollFailCountRef = useRef(0);
 
   const amount = plan
     ? period === 'yearly' ? plan.priceYearly : plan.priceMonthly
@@ -113,11 +114,26 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
     setStep('checking');
     setError('');
     pollStartedAtRef.current = Date.now();
+    pollFailCountRef.current = 0;
 
     pollRef.current = setInterval(() => {
-      fetch(`${API_BASE}/api/payment/orders/${order.code}`)
-        .then((r) => r.json())
+      // Timeout check FIRST — runs regardless of fetch result
+      if (Date.now() - pollStartedAtRef.current > MAX_POLL_MS) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+        setError('Hết thời gian chờ xác nhận thanh toán. Nếu bạn đã chuyển khoản, hãy mở lại đơn hàng hoặc liên hệ hỗ trợ.');
+        setStep('error');
+        return;
+      }
+
+      fetch(`${API_BASE}/api/payment/orders/${order.code}`, { cache: 'no-store' })
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then((data) => {
+          pollFailCountRef.current = 0;
+
           if (data.ok && data.order.status === 'paid') {
             clearInterval(pollRef.current);
             pollRef.current = null;
@@ -131,17 +147,17 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
             pollRef.current = null;
             setError('Đơn hàng đã hết hạn. Vui lòng tạo đơn mới để tiếp tục thanh toán.');
             setStep('error');
-            return;
-          }
-
-          if (Date.now() - pollStartedAtRef.current > MAX_POLL_MS) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-            setError('Hết thời gian chờ xác nhận thanh toán. Nếu bạn đã chuyển khoản, hãy mở lại đơn hàng hoặc liên hệ hỗ trợ.');
-            setStep('error');
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          pollFailCountRef.current += 1;
+          if (pollFailCountRef.current >= 12) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setError('Mất kết nối với server. Hãy kiểm tra mạng rồi thử lại.');
+            setStep('error');
+          }
+        });
     }, 5000);
   }, [order]);
 
@@ -149,10 +165,15 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
   useEffect(() => {
     if (step === 'transfer' && order?.code && !pollRef.current) {
       pollStartedAtRef.current = Date.now();
+      pollFailCountRef.current = 0;
       pollRef.current = setInterval(() => {
-        fetch(`${API_BASE}/api/payment/orders/${order.code}`)
-          .then((r) => r.json())
+        fetch(`${API_BASE}/api/payment/orders/${order.code}`, { cache: 'no-store' })
+          .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
           .then((data) => {
+            pollFailCountRef.current = 0;
             if (data.ok && data.order.status === 'paid') {
               clearInterval(pollRef.current);
               pollRef.current = null;
@@ -165,7 +186,9 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
               setStep('error');
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            pollFailCountRef.current += 1;
+          });
       }, 5000);
     }
     return () => {
