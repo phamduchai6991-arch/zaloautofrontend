@@ -488,13 +488,18 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       return;
     }
 
+    let didChange = false;
     setDrilledGroup((prev) => {
       const prevId = String(prev?.zid || prev?.key || '').trim();
       const nextId = String(selectedGroupForMemberView?.zid || selectedGroupForMemberView?.key || '').trim();
+      // Keep current drilled group if selectedGroupForMemberView becomes null
+      // (happens when member checkboxes change selectedRows, breaking group row match)
+      if (!nextId && prevId) return prev;
       if (prevId === nextId && prevId) return prev;
+      didChange = true;
       return selectedGroupForMemberView;
     });
-    setPage(0);
+    if (didChange) setPage(0);
   }, [activeTab, viewState.showHiddenMembers, selectedGroupForMemberView]);
 
   useEffect(() => {
