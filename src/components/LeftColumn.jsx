@@ -45,6 +45,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { PLAN_LIMITS, useSubscription } from '../contexts/SubscriptionContext';
 import {
   executeMessageJobs,
+  runActionBatchViaExtension,
 } from '../utils/extensionBridge';
 import {
   sendFriendRequestRequest,
@@ -1134,21 +1135,54 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         }
       }
 
-      // --- No backend: mark as unsupported ---
+      // --- Strategy 2: Extension fallback ---
       if (!backendActionOk) {
-        const actionMessage = 'Các thao tác quản lý hàng loạt hiện chưa hỗ trợ khi backend không khả dụng.';
+        try {
+          setFeedback({
+            severity: 'info',
+            message: `Đang thực thi ${actionRecords.length} thao tác qua extension...`,
+          });
+
+          const extResult = await runActionBatchViaExtension({
+            account: activeAccount,
+            jobs: actionRecords,
+          });
+
+          const extData = extResult?.data || extResult || {};
+          const extResults = Array.isArray(extData.results) ? extData.results : [];
+
+          if (extResults.length > 0) {
+            backendActionOk = true;
+            extResults.forEach((data) => {
+              const originalJob = actionRecords.find((j) => j.id === data.jobId) || {};
+              onCampaignCommit?.({ actionJobs: [{ ...originalJob, ...data, provider: 'extension' }] });
+            });
+
+            const extAccepted = extResults.filter((r) => r.ok).length;
+            const extFailed = extResults.filter((r) => !r.ok).length;
+            actionSummary = {
+              severity: extFailed > 0 ? 'warning' : 'success',
+              message: `Extension đã xử lý ${extAccepted}/${actionRecords.length} thao tác.${extFailed > 0 ? ` ${extFailed} thất bại.` : ''}`,
+            };
+          }
+        } catch (extError) {
+          // Extension also failed
+        }
+      }
+
+      if (!backendActionOk) {
         onCampaignCommit?.({
           actionJobs: actionRecords.map((job) => ({
             ...job,
             status: 'failed',
-            statusLabel: 'Backend không khả dụng',
-            error: actionMessage,
+            statusLabel: 'Không thể thực thi',
+            error: 'Không có backend hoặc extension khả dụng.',
             provider: 'extension',
           })),
         });
         actionSummary = {
           severity: 'warning',
-          message: actionMessage,
+          message: 'Không thể thực thi thao tác: backend và extension đều không khả dụng.',
         };
       }
     }

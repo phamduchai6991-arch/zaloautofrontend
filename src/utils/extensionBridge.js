@@ -274,6 +274,30 @@ export function resolveUserTargetsViaExtension(payload) {
   });
 }
 
+export function runActionBatchViaExtension(payload) {
+  return zFetch({
+    account: payload?.account,
+    request: {
+      method: 'runActionBatch',
+      args: {
+        jobs: Array.isArray(payload?.jobs) ? payload.jobs : [],
+      },
+    },
+  });
+}
+
+export function findUserViaExtension(payload) {
+  return zFetch({
+    account: payload?.account,
+    request: {
+      method: 'findUser',
+      args: {
+        phone: payload?.phone || '',
+      },
+    },
+  });
+}
+
 /** Subscribe to real-time incoming Zalo messages. Returns unsubscribe fn. */
 export function onIncomingMessages(callback) {
   return onExtensionMessage((msg) => {

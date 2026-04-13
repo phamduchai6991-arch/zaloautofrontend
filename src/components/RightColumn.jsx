@@ -530,26 +530,28 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       let response = null;
       let lastError = null;
 
+      // Strategy 1: Try extension first (no local service needed)
       try {
-        const localServiceReady = await checkLocalZaloService(1200);
-        if (localServiceReady) {
-          response = await resolveGroupInviteTargetsViaLocalService({
-            account: activeAccount,
-            groups: groupPayload,
-            includeAllMembers: true,
-          });
-        }
+        response = await resolveGroupMembersViaExtension({
+          account: activeAccount,
+          groups: groupPayload,
+          allowCreateTab: false,
+        });
       } catch (error) {
         lastError = error;
       }
 
+      // Strategy 2: Fall back to local service if available
       if (!response) {
         try {
-          response = await resolveGroupMembersViaExtension({
-            account: activeAccount,
-            groups: groupPayload,
-            allowCreateTab: false,
-          });
+          const localServiceReady = await checkLocalZaloService(1200);
+          if (localServiceReady) {
+            response = await resolveGroupInviteTargetsViaLocalService({
+              account: activeAccount,
+              groups: groupPayload,
+              includeAllMembers: true,
+            });
+          }
         } catch (error) {
           lastError = error;
         }
@@ -559,7 +561,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         throw new Error(
           response?.error
             || lastError?.message
-            || 'Không thể tải danh sách thành viên nhóm. Nếu không dùng local service, hãy mở sẵn tab Zalo đúng tài khoản trước khi bật Hiển thị thành viên ẩn.'
+            || 'Không thể tải danh sách thành viên nhóm. Hãy mở sẵn tab Zalo đúng tài khoản trước khi bật Hiển thị thành viên ẩn.'
         );
       }
 
