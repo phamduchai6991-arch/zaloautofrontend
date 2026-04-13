@@ -14,10 +14,12 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
+  Button,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
   CheckCircle as CheckIcon,
+  Download as DownloadIcon,
   Extension as ExtIcon,
   Person as PersonIcon,
   Chat as ChatIcon,
@@ -42,13 +44,36 @@ const SECTIONS = [
         <Alert severity="info" sx={{ mb: 2 }}>
           AutoZalo cần extension "AutoZalo Bridge" để kết nối với Zalo. Hãy cài đặt trước khi sử dụng.
         </Alert>
+
+        <Button
+          variant="contained"
+          component="a"
+          href="/autozalo-extension.zip"
+          download="autozalo-extension.zip"
+          startIcon={<DownloadIcon />}
+          sx={{
+            mb: 2,
+            textTransform: 'none',
+            fontWeight: 700,
+            fontSize: '0.95rem',
+            borderRadius: '10px',
+            px: 3,
+            py: 1,
+            bgcolor: '#ef4444',
+            '&:hover': { bgcolor: '#dc2626' },
+          }}
+        >
+          Tải Extension AutoZalo v2.0.0
+        </Button>
+
         <Typography variant="subtitle2" gutterBottom>Các bước cài đặt:</Typography>
         <List dense>
           {[
+            'Tải file extension ở nút phía trên và giải nén (extract) ra một thư mục',
             'Mở Chrome, vào chrome://extensions',
             'Bật "Chế độ nhà phát triển" (góc phải trên)',
             'Nhấn "Tải tiện ích đã giải nén"',
-            'Chọn thư mục extension trong dự án',
+            'Chọn thư mục extension đã giải nén ở bước 1',
             'Bật "Cho phép trong cửa sổ ẩn danh"',
             'Mở Chi tiết extension và đặt Site access thành On all sites hoặc cho phép riêng zaloautofrontend.onrender.com',
             'Tải lại trang web AutoZalo',
