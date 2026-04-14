@@ -5,16 +5,57 @@ const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const SUBSCRIPTION_CACHE_KEY = 'autozalo_subscription_cache';
 
 export const PLAN_LIMITS = {
+  free: 1,
   basic: 1,
   plus: 3,
   pro: 10,
 };
 
 export const PLAN_LABELS = {
+  free: 'Free',
   basic: 'Basic',
   plus: 'Plus',
   pro: 'Pro',
 };
+
+// Plan tier rank: higher = more features
+const PLAN_RANK = { free: 0, basic: 1, plus: 2, pro: 3 };
+
+// Minimum plan required for each gated feature
+export const FEATURE_MIN_PLAN = {
+  // BASIC features (available to all paid plans)
+  send_message:       'basic',
+  friend_request:     'basic',
+  remove_friend:      'basic',
+  undo_friend_request:'basic',
+  leave_group:        'basic',
+  reject_friend_request:'basic',
+  accept_friend_request:'basic',
+  // PLUS features
+  ai_rewrite:         'plus',
+  quick_message:      'plus',
+  classify_contact:   'plus',
+  manage_conversation:'plus',
+  mute_notification:  'plus',
+  unmute_notification:'plus',
+  // PRO features
+  pull_group:         'pro',
+  join_group:         'pro',
+  hidden_members:     'pro',
+};
+
+export function canUsePlanFeature(feature, currentPlan) {
+  const minPlan = FEATURE_MIN_PLAN[feature];
+  if (!minPlan) return true; // unknown feature → allow
+  const minRank = PLAN_RANK[minPlan] || 0;
+  const currentRank = PLAN_RANK[currentPlan] || 0;
+  return currentRank >= minRank;
+}
+
+export function getRequiredPlanLabel(feature) {
+  const minPlan = FEATURE_MIN_PLAN[feature];
+  return minPlan ? (PLAN_LABELS[minPlan] || minPlan).toUpperCase() : '';
+}
 
 const SubscriptionContext = createContext(null);
 const SUBSCRIPTION_CHANGED_EVENT = 'autozalo:subscription-changed';
@@ -142,8 +183,8 @@ export function SubscriptionProvider({ children }) {
     };
   }, [fetchSubscription, user?.sub]);
 
-  const planKey = subscription?.status === 'active' ? subscription.planKey : 'basic';
-  const maxAccounts = PLAN_LIMITS[planKey] ?? PLAN_LIMITS.basic;
+  const planKey = subscription?.status === 'active' ? subscription.planKey : 'free';
+  const maxAccounts = PLAN_LIMITS[planKey] ?? PLAN_LIMITS.free;
   const isActive = subscription?.status === 'active';
   const isExpired = subscription?.status === 'expired';
 

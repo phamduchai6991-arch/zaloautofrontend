@@ -748,16 +748,17 @@ export function AccountProvider({ children }) {
     const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
     if (!API_BASE) return null;
 
-    const res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: acct }),
-    });
+    try {
+      const res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account: acct }),
+      });
 
-    const result = await res.json();
-    if (!result?.ok || !result.data) {
-      throw new Error(result?.error || 'Backend không thể đồng bộ tài khoản.');
-    }
+      const result = await res.json();
+      if (!result?.ok || !result.data) {
+        throw new Error(result?.error || 'Backend không thể đồng bộ tài khoản.');
+      }
 
     const d = result.data;
     const patch = {
@@ -782,6 +783,10 @@ export function AccountProvider({ children }) {
     setReceivedFriendRequests(patch.receivedFriendRequests);
 
     return patch;
+    } catch (err) {
+      console.warn('[AccountContext] refreshAccountViaBackend failed:', err?.message || err);
+      return null;
+    }
   }, [accounts, activeAccountIndex, getAuthHeaders, googleUserId, updateAccountById]);
 
   const value = {

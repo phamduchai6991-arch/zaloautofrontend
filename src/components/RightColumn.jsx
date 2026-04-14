@@ -67,6 +67,7 @@ import {
 } from '../utils/reachGroupLibraryStore';
 import { checkLocalZaloService, resolveGroupInviteTargetsViaBackend, resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
 import { resolveUserTargetsViaExtension } from '../utils/extensionBridge';
+import { useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
 
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
 const GROUP_COLLECTIONS_KEY = 'zt_group_collections';
@@ -149,6 +150,7 @@ const DATA_TABS = [
 
 export default function RightColumn({ campaignState, actionState, onActionStateChange, onSelectionChange }) {
   const { friends, groups, activeAccount, sentFriendRequests, receivedFriendRequests } = useAccount();
+  const { planKey } = useSubscription();
   const [locTrung, setLocTrung] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -231,6 +233,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
   const handleCollectionChange = (rowKey, nextValue) => {
     if (!activeAccountId || !rowKey) return;
+    if (!canUsePlanFeature('classify_contact', planKey)) return;
 
     setFriendCollections((prev) => {
       const current = prev[activeAccountId] && typeof prev[activeAccountId] === 'object'
@@ -259,6 +262,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   };
 
   const handleGroupCollectionChange = (rowKey, nextValue) => {
+    if (!canUsePlanFeature('classify_contact', planKey)) return;
     if (!activeAccountId || !rowKey) return;
 
     setGroupCollections((prev) => {
@@ -765,7 +769,24 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               const isLocal = getControlKind(controlKey) === 'local';
               const checked = isLocal ? Boolean(viewState[controlKey]) : Boolean(actionState?.[controlKey]);
 
+              // Feature gating for plan-restricted controls
+              const featureKeyMap = {
+                showHiddenMembers: 'hidden_members',
+                pullGroup: 'pull_group',
+                joinGroup: 'join_group',
+                muteNotifications: 'mute_notification',
+                unmuteNotifications: 'unmute_notification',
+                removeFriend: 'remove_friend',
+                leaveGroup: 'leave_group',
+                undoFriendRequest: 'undo_friend_request',
+                rejectFriendRequest: 'reject_friend_request',
+                acceptFriendRequest: 'accept_friend_request',
+              };
+              const featureKey = featureKeyMap[controlKey];
+              const featureBlocked = featureKey && !canUsePlanFeature(featureKey, planKey);
+
               const handleChange = (checkedValue) => {
+                if (featureBlocked) return;
                 if (isLocal) {
                   setViewState((prev) => ({ ...prev, [controlKey]: checkedValue }));
                   return;
@@ -775,12 +796,18 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               };
 
               return (
-                <Box key={controlKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Box key={controlKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: featureBlocked ? 0.5 : 1 }}>
                   <Typography variant="body1" fontWeight={600}>
                     {getControlLabel(controlKey)}
+                    {featureBlocked && (
+                      <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 0.5 }}>
+                        ({getRequiredPlanLabel(featureKey)})
+                      </Typography>
+                    )}
                   </Typography>
                   <Switch
                     checked={checked}
+                    disabled={featureBlocked}
                     onChange={(event) => handleChange(event.target.checked)}
                     size="small"
                   />
@@ -1090,6 +1117,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                       <Select
                         value={normalizeCollection(row.classification)}
                         onChange={(event) => handleCollectionChange(row.rowKey || buildRowKey(row, globalIdx), event.target.value)}
+                        disabled={!canUsePlanFeature('classify_contact', planKey)}
                         displayEmpty
                         renderValue={(value) => <CollectionPill value={value} muted={value === DEFAULT_FRIEND_COLLECTION} />}
                         sx={{
@@ -1116,6 +1144,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                       <Select
                         value={normalizeCollection(row.classification)}
                         onChange={(event) => handleGroupCollectionChange(row.rowKey || buildRowKey(row, globalIdx), event.target.value)}
+                        disabled={!canUsePlanFeature('classify_contact', planKey)}
                         displayEmpty
                         renderValue={(value) => <CollectionPill value={value} muted={value === DEFAULT_FRIEND_COLLECTION} />}
                         sx={{

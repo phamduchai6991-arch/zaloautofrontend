@@ -42,7 +42,7 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useAccount } from '../contexts/AccountContext';
-import { PLAN_LIMITS, useSubscription } from '../contexts/SubscriptionContext';
+import { PLAN_LIMITS, useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
 import {
   executeMessageJobs,
   runActionBatchViaExtension,
@@ -728,16 +728,16 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     const latestSubscription = await refetchSubscription();
-    const effectivePlanKey = latestSubscription?.status === 'active' ? latestSubscription.planKey : 'basic';
-    const effectiveMaxAccounts = PLAN_LIMITS[effectivePlanKey] ?? PLAN_LIMITS.basic;
+    const effectivePlanKey = latestSubscription?.status === 'active' ? latestSubscription.planKey : 'free';
+    const effectiveMaxAccounts = PLAN_LIMITS[effectivePlanKey] ?? PLAN_LIMITS.free;
     const currentServerAccountCount = await refreshServerAccountCount();
 
     if (accounts.length >= effectiveMaxAccounts || currentServerAccountCount >= effectiveMaxAccounts) {
-      const needUpgrade = effectivePlanKey === 'basic' || !latestSubscription?.status || latestSubscription?.status !== 'active';
+      const needUpgrade = !latestSubscription?.status || latestSubscription?.status !== 'active';
       setFeedback({
         severity: 'warning',
         message: needUpgrade
-          ? `Gói miễn phí chỉ cho phép ${effectiveMaxAccounts} tài khoản Zalo. Hãy mua gói Plus hoặc Pro để thêm nhiều hơn.`
+          ? `Bạn cần đăng ký gói để thêm tài khoản Zalo. Hãy mua gói Basic, Plus hoặc Pro.`
           : `Gói ${effectivePlanKey?.toUpperCase()} chỉ cho phép tối đa ${effectiveMaxAccounts} tài khoản Zalo. Bạn đã đăng ký ${currentServerAccountCount}/${effectiveMaxAccounts} trên hệ thống. Hãy nâng cấp gói để thêm nhiều hơn.`,
       });
       return;
@@ -795,6 +795,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   };
 
   const openRewriteDialog = async (target) => {
+    if (!canUsePlanFeature('ai_rewrite', planKey)) {
+      setFeedback({ severity: 'warning', message: `Viết lại bằng AI yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên. Vui lòng nâng cấp để sử dụng.` });
+      return;
+    }
     const sourceText = target === 'friend' ? friendRequest : message;
     if (!sourceText.trim()) {
       setFeedback({ severity: 'warning', message: 'Cần nhập nội dung trước khi viết lại.' });
@@ -830,6 +834,30 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         message: isExpired
           ? 'Gói của bạn đã hết hạn. Vui lòng gia hạn trước khi chạy các thao tác Zalo.'
           : 'Bạn cần đăng ký gói trước khi chạy các thao tác Zalo.',
+      });
+      return;
+    }
+
+    // Per-feature plan gating
+    const featureGates = [];
+    if (ketBanEnabled) featureGates.push({ key: 'friend_request', label: 'Kết bạn' });
+    if (nhanTinEnabled) featureGates.push({ key: 'send_message', label: 'Nhắn tin' });
+    if (removeFriendEnabled) featureGates.push({ key: 'remove_friend', label: 'Xóa bạn bè' });
+    if (leaveGroupEnabled) featureGates.push({ key: 'leave_group', label: 'Rời nhóm' });
+    if (muteNotificationsEnabled) featureGates.push({ key: 'mute_notification', label: 'Tắt thông báo' });
+    if (unmuteNotificationsEnabled) featureGates.push({ key: 'unmute_notification', label: 'Bật thông báo' });
+    if (pullGroupEnabled) featureGates.push({ key: 'pull_group', label: 'Kéo nhóm' });
+    if (joinGroupEnabled) featureGates.push({ key: 'join_group', label: 'Tham gia nhóm' });
+    if (undoFriendRequestEnabled) featureGates.push({ key: 'undo_friend_request', label: 'Rút lời mời kết bạn' });
+    if (rejectFriendRequestEnabled) featureGates.push({ key: 'reject_friend_request', label: 'Từ chối kết bạn' });
+    if (acceptFriendRequestEnabled) featureGates.push({ key: 'accept_friend_request', label: 'Đồng ý kết bạn' });
+    const blockedFeatures = featureGates.filter((f) => !canUsePlanFeature(f.key, planKey));
+    if (blockedFeatures.length > 0) {
+      const labels = blockedFeatures.map((f) => f.label).join(', ');
+      const requiredPlan = [...new Set(blockedFeatures.map((f) => getRequiredPlanLabel(f.key)))].join(' / ');
+      setFeedback({
+        severity: 'warning',
+        message: `Thao tác ${labels} yêu cầu gói ${requiredPlan} trở lên. Vui lòng nâng cấp để sử dụng.`,
       });
       return;
     }
@@ -1840,8 +1868,14 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             <Button
               size="small"
               startIcon={<FlashIcon fontSize="small" />}
-              disabled={!hasAccount || !nhanTinEnabled}
-              onClick={() => setTemplateDialogOpen(true)}
+              disabled={!hasAccount || !nhanTinEnabled || !canUsePlanFeature('quick_message', planKey)}
+              onClick={() => {
+                if (!canUsePlanFeature('quick_message', planKey)) {
+                  setFeedback({ severity: 'warning', message: `Tin nhắn nhanh yêu cầu gói ${getRequiredPlanLabel('quick_message')} trở lên.` });
+                  return;
+                }
+                setTemplateDialogOpen(true);
+              }}
               sx={{
                 textTransform: 'none',
                 fontSize: '0.8rem',

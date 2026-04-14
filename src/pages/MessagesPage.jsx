@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import { useAccount } from '../contexts/AccountContext';
-import { useSubscription } from '../contexts/SubscriptionContext';
+import { useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
 import { onIncomingMessages, zFetch } from '../utils/extensionBridge';
 import {
   buildFriendMap,
@@ -34,7 +34,7 @@ function isExtensionInvalidationError(value) {
 
 export default function MessagesPage() {
   const { activeAccount, activeAccountReady, extensionActive, syncState } = useAccount();
-  const { isActive } = useSubscription();
+  const { isActive, planKey } = useSubscription();
   const [conversations, setConversations] = useState(() => {
     try {
       const raw = localStorage.getItem('zt_conversations');
@@ -53,6 +53,10 @@ export default function MessagesPage() {
   const refreshConversations = useCallback(async () => {
     if (!isActive) {
       setFeedback({ severity: 'warning', message: 'Gói của bạn không còn hiệu lực. Vui lòng gia hạn để đọc và quản lý hội thoại.' });
+      return;
+    }
+    if (!canUsePlanFeature('manage_conversation', planKey)) {
+      setFeedback({ severity: 'warning', message: `Quản lý hội thoại yêu cầu gói ${getRequiredPlanLabel('manage_conversation')} trở lên. Vui lòng nâng cấp để sử dụng.` });
       return;
     }
 
@@ -114,7 +118,7 @@ export default function MessagesPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeAccount, activeAccountReady, extensionActive, isActive, syncState.phase]);
+  }, [activeAccount, activeAccountReady, extensionActive, isActive, planKey, syncState.phase]);
 
   // Don't auto-refresh on mount — uses cached conversations.
   // User clicks "Đồng bộ ngay" to fetch fresh data (requires extension → opens Chrome).
