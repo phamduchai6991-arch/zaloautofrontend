@@ -150,7 +150,7 @@ const DATA_TABS = [
 ];
 
 export default function RightColumn({ campaignState, actionState, onActionStateChange, onSelectionChange }) {
-  const { friends, groups, activeAccount, sentFriendRequests, receivedFriendRequests } = useAccount();
+  const { friends, groups, activeAccount, accounts, activeAccountIndex, sentFriendRequests, receivedFriendRequests } = useAccount();
   const { planKey } = useSubscription();
   const [locTrung, setLocTrung] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
@@ -292,16 +292,53 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     });
   };
 
+  // Build effective friends list: merge from all accounts if toggle is on, otherwise use active account only
+  const effectiveFriendSource = useMemo(() => {
+    if (!viewState.showAllAccountsFriends || accounts.length <= 1) {
+      return friends.map((f) => ({ ...f, _sourceAccountId: activeAccountId, _sourceAccountLabel: '' }));
+    }
+    const seen = new Map();
+    const merged = [];
+    for (let ai = 0; ai < accounts.length; ai++) {
+      const acct = accounts[ai];
+      const acctId = String(acct.id || acct.userId || `acct_${ai}`);
+      const acctLabel = acct.name || acct.phone || `Nick ${ai + 1}`;
+      const acctFriends = Array.isArray(acct.friends) ? acct.friends : [];
+      for (const f of acctFriends) {
+        const uid = f.userId || f.globalId || f.username || '';
+        if (!uid) continue;
+        if (seen.has(uid)) {
+          // Mark as shared — append account label
+          const existing = seen.get(uid);
+          if (!existing._sourceAccountLabels.includes(acctLabel)) {
+            existing._sourceAccountLabels.push(acctLabel);
+          }
+        } else {
+          const entry = { ...f, _sourceAccountId: acctId, _sourceAccountLabel: acctLabel, _sourceAccountLabels: [acctLabel], _sourceAccountIndex: ai };
+          seen.set(uid, entry);
+          merged.push(entry);
+        }
+      }
+    }
+    return merged;
+  }, [viewState.showAllAccountsFriends, accounts, friends, activeAccountId]);
+
   const filteredFriendRows = dedupeRows(
-    friends
+    effectiveFriendSource
       .map(normalizeFriendRow)
       .map((friend, idx) => {
+        // Carry over source account metadata from the raw friend entry
+        const raw = effectiveFriendSource[idx];
         const rowKey = buildRowKey(friend, idx);
         const storedCollection = accountFriendCollections[rowKey];
         return {
           ...friend,
           rowKey,
           classification: normalizeCollection(storedCollection || friend.classification),
+          _sourceAccountId: raw?._sourceAccountId || activeAccountId,
+          _sourceAccountLabel: raw?._sourceAccountLabel || '',
+          _sourceAccountLabels: raw?._sourceAccountLabels || [],
+          _sourceAccountIndex: raw?._sourceAccountIndex ?? activeAccountIndex,
         };
       })
       .filter((friend) => {
@@ -785,9 +822,11 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               };
               const featureKey = featureKeyMap[controlKey];
               const featureBlocked = featureKey && !canUsePlanFeature(featureKey, planKey);
+              const isAllNickToggle = controlKey === 'showAllAccountsFriends';
+              const allNickDisabled = isAllNickToggle && accounts.length <= 1;
 
               const handleChange = (checkedValue) => {
-                if (featureBlocked) return;
+                if (featureBlocked || allNickDisabled) return;
                 if (isLocal) {
                   setViewState((prev) => ({ ...prev, [controlKey]: checkedValue }));
                   return;
@@ -797,7 +836,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               };
 
               return (
-                <Box key={controlKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: featureBlocked ? 0.5 : 1 }}>
+                <Box key={controlKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: (featureBlocked || allNickDisabled) ? 0.5 : 1 }}>
                   <Typography variant="body1" fontWeight={600}>
                     {getControlLabel(controlKey)}
                     {featureBlocked && (
@@ -808,7 +847,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                   </Typography>
                   <Switch
                     checked={checked}
-                    disabled={featureBlocked}
+                    disabled={featureBlocked || allNickDisabled}
                     onChange={(event) => handleChange(event.target.checked)}
                     size="small"
                   />
@@ -892,6 +931,12 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
             ))}
           </Select>
         </FormControl>
+      )}
+
+      {viewState.showAllAccountsFriends && activeTab === 0 && accounts.length > 1 && (
+        <Alert severity="info" sx={{ mb: 2, py: 0.5 }} icon={false}>
+          Đang hiển thị bạn bè từ <strong>{accounts.length} tài khoản</strong> ({filteredFriendRows.length} bạn bè). Nhãn nick nguồn hiển thị bên cạnh tên.
+        </Alert>
       )}
 
       {(activeTab === 4 || activeTab === 5) && (
@@ -1103,6 +1148,16 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                         <Typography variant="caption" color={row.found === false ? 'error.main' : undefined}>
                           {row.name}
                         </Typography>
+                        {viewState.showAllAccountsFriends && activeTab === 0 && row._sourceAccountLabels?.length > 0 && (
+                          <Chip
+                            label={row._sourceAccountLabels.length > 1 ? `${row._sourceAccountLabels.length} nick` : row._sourceAccountLabels[0]}
+                            size="small"
+                            variant="outlined"
+                            color={row._sourceAccountLabels.length > 1 ? 'secondary' : 'default'}
+                            sx={{ fontSize: '0.6rem', height: 18, ml: 0.5, maxWidth: 90, '& .MuiChip-label': { px: 0.5 } }}
+                            title={row._sourceAccountLabels.join(', ')}
+                          />
+                        )}
                       </>
                     ) : (
                       <Typography variant="caption" color="text.secondary">—</Typography>
