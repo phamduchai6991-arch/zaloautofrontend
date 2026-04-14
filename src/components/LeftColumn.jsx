@@ -2057,9 +2057,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
                 Tạo lại
               </Button>
             )}
-              </Button>
-              </span>
-            </Tooltip>
           </Box>
         </Paper>
       </Box>
