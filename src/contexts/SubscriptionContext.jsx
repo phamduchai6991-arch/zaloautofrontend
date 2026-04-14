@@ -78,7 +78,10 @@ export function SubscriptionProvider({ children }) {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/payment/subscription/${encodeURIComponent(user.sub)}`, { cache: 'no-store' });
+      const params = new URLSearchParams();
+      if (user.email) params.set('email', user.email);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/api/payment/subscription/${encodeURIComponent(user.sub)}${suffix}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const nextSubscription = data.subscription || null;
