@@ -236,7 +236,7 @@ export default function PricingPage() {
 
   const handleBuy = (plan) => {
     if (!user) {
-      navigate('/login');
+      window.location.assign('/login');
       return;
     }
     setSelectedPlan(plan);

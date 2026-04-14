@@ -34,7 +34,7 @@ export default function HeaderBar() {
   const [anchorEl, setAnchorEl] = useState(null);
 
   const openLoginPage = () => {
-    navigate('/login');
+    window.location.assign('/login');
   };
 
   const planLabel = user
@@ -157,7 +157,7 @@ export default function HeaderBar() {
         {/* Mua Gói */}
         <Button
           size="small"
-          onClick={() => navigate('/pricing')}
+          onClick={() => window.location.assign('/pricing')}
           sx={{
             fontSize: '0.8rem',
             fontWeight: 700,
