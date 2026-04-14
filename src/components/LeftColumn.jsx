@@ -25,6 +25,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -1793,20 +1794,24 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           />
 
           <Box sx={{ display: 'flex', gap: 1, px: 1.5, pb: 1 }}>
-            <Button
-              size="small"
-              startIcon={<AiIcon fontSize="small" />}
-              disabled={!hasAccount || !ketBanEnabled || !friendRequest.trim()}
-              onClick={() => openRewriteDialog('friend')}
-              sx={{
-                textTransform: 'none',
-                fontSize: '0.8rem',
-                borderRadius: '16px',
-                px: 1.5,
-              }}
-            >
-              AI viết lại
-            </Button>
+            <Tooltip title={!canUsePlanFeature('ai_rewrite', planKey) ? `Yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên` : ''} arrow>
+              <span>
+              <Button
+                size="small"
+                startIcon={<AiIcon fontSize="small" />}
+                disabled={!hasAccount || !ketBanEnabled || !friendRequest.trim() || !canUsePlanFeature('ai_rewrite', planKey)}
+                onClick={() => openRewriteDialog('friend')}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: '0.8rem',
+                  borderRadius: '16px',
+                  px: 1.5,
+                }}
+              >
+                AI viết lại
+              </Button>
+              </span>
+            </Tooltip>
           </Box>
         </Paper>
       </Box>
@@ -1851,40 +1856,42 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           />
 
           <Box sx={{ display: 'flex', gap: 1, px: 1.5, pb: 1 }}>
-            <Button
-              size="small"
-              startIcon={<AiIcon fontSize="small" />}
-              disabled={!hasAccount || !nhanTinEnabled || !message.trim()}
-              onClick={() => openRewriteDialog('message')}
-              sx={{
-                textTransform: 'none',
-                fontSize: '0.8rem',
-                borderRadius: '16px',
-                px: 1.5,
-              }}
-            >
-              AI viết lại
-            </Button>
-            <Button
-              size="small"
-              startIcon={<FlashIcon fontSize="small" />}
-              disabled={!hasAccount || !nhanTinEnabled || !canUsePlanFeature('quick_message', planKey)}
-              onClick={() => {
-                if (!canUsePlanFeature('quick_message', planKey)) {
-                  setFeedback({ severity: 'warning', message: `Tin nhắn nhanh yêu cầu gói ${getRequiredPlanLabel('quick_message')} trở lên.` });
-                  return;
-                }
-                setTemplateDialogOpen(true);
-              }}
-              sx={{
-                textTransform: 'none',
-                fontSize: '0.8rem',
-                borderRadius: '16px',
-                px: 1.5,
-              }}
-            >
-              Tin nhắn nhanh
-            </Button>
+            <Tooltip title={!canUsePlanFeature('ai_rewrite', planKey) ? `Yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên` : ''} arrow>
+              <span>
+              <Button
+                size="small"
+                startIcon={<AiIcon fontSize="small" />}
+                disabled={!hasAccount || !nhanTinEnabled || !message.trim() || !canUsePlanFeature('ai_rewrite', planKey)}
+                onClick={() => openRewriteDialog('message')}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: '0.8rem',
+                  borderRadius: '16px',
+                  px: 1.5,
+                }}
+              >
+                AI viết lại
+              </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={!canUsePlanFeature('quick_message', planKey) ? `Yêu cầu gói ${getRequiredPlanLabel('quick_message')} trở lên` : ''} arrow>
+              <span>
+              <Button
+                size="small"
+                startIcon={<FlashIcon fontSize="small" />}
+                disabled={!hasAccount || !nhanTinEnabled || !canUsePlanFeature('quick_message', planKey)}
+                onClick={() => setTemplateDialogOpen(true)}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: '0.8rem',
+                  borderRadius: '16px',
+                  px: 1.5,
+                }}
+              >
+                Tin nhắn nhanh
+              </Button>
+              </span>
+            </Tooltip>
           </Box>
         </Paper>
 

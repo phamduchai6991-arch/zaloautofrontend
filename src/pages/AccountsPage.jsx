@@ -74,7 +74,7 @@ export default function AccountsPage() {
           sx={{ mb: 2 }}
           action={<Button color="error" size="small" onClick={() => window.location.assign('/pricing')}>Gia hạn</Button>}
         >
-          Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.
+          Gói <strong>{PLAN_LABELS[subscription?.planKey] || subscription?.planKey || planKey}</strong> đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.
         </Alert>
       );
     }

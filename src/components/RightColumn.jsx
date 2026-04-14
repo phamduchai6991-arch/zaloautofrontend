@@ -26,6 +26,7 @@ import {
   TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -1052,7 +1053,16 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               </TableCell>
               {!isDrilledIntoMembers && (
                 <TableCell sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
-                  {activeTab === 2 ? 'Mô tả' : activeTab === 3 ? 'Trạng thái' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : 'Phân loại'}
+                  {activeTab === 2 ? 'Mô tả' : activeTab === 3 ? 'Trạng thái' : activeTab === 4 || activeTab === 5 ? 'Nội dung' : (
+                    <>
+                      Phân loại
+                      {!canUsePlanFeature('classify_contact', planKey) && (
+                        <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 0.5 }}>
+                          ({getRequiredPlanLabel('classify_contact')})
+                        </Typography>
+                      )}
+                    </>
+                  )}
                 </TableCell>
               )}
             </TableRow>
@@ -1113,6 +1123,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                 {!isDrilledIntoMembers && (
                 <TableCell>
                   {activeTab === 0 ? (
+                    <Tooltip title={!canUsePlanFeature('classify_contact', planKey) ? `Phân loại liên hệ yêu cầu gói ${getRequiredPlanLabel('classify_contact')} trở lên` : ''} arrow>
                     <FormControl size="small" fullWidth>
                       <Select
                         value={normalizeCollection(row.classification)}
@@ -1139,7 +1150,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                         ))}
                       </Select>
                     </FormControl>
+                    </Tooltip>
                   ) : activeTab === 1 ? (
+                    <Tooltip title={!canUsePlanFeature('classify_contact', planKey) ? `Phân loại liên hệ yêu cầu gói ${getRequiredPlanLabel('classify_contact')} trở lên` : ''} arrow>
                     <FormControl size="small" fullWidth>
                       <Select
                         value={normalizeCollection(row.classification)}
@@ -1166,6 +1179,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                         ))}
                       </Select>
                     </FormControl>
+                    </Tooltip>
                   ) : activeTab === 2 ? (
                     <Typography variant="caption" color="text.secondary">
                       {row.classification || '—'}
