@@ -1435,6 +1435,32 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               severity: failed > 0 ? 'warning' : 'success',
               message: `Server đã gửi ${accepted}/${messageRecords.length} tin nhắn.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
             };
+          } else if (res.status > 0) {
+            // Backend reachable but returned error — don't fallback to extension
+            backendOk = true;
+            let errorMsg = `Server lỗi (${res.status}).`;
+            try {
+              const errData = await res.json();
+              if (errData?.error) errorMsg = errData.error;
+              if (errData?.code === 'SERVICE_LOGIN_FAILED') {
+                errorMsg = 'Phiên Zalo đã hết hạn. Hãy đồng bộ lại tài khoản rồi thử lại.';
+              }
+            } catch { /* ignore */ }
+
+            onCampaignCommit?.({
+              messageJobs: messageRecords.map((job) => ({
+                ...job,
+                status: 'failed',
+                statusLabel: 'Server lỗi',
+                error: errorMsg,
+                provider: 'server',
+              })),
+            });
+
+            messageSummary = {
+              severity: 'error',
+              message: errorMsg,
+            };
           }
         } catch (_) {
           // Backend unreachable — fall through to extension
