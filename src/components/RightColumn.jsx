@@ -65,8 +65,8 @@ import {
   loadGroupLibraryEntries,
   subscribeGroupLibraryChange,
 } from '../utils/reachGroupLibraryStore';
-import { checkLocalZaloService, resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
-import { resolveGroupMembersViaExtension, resolveUserTargetsViaExtension } from '../utils/extensionBridge';
+import { checkLocalZaloService, resolveGroupInviteTargetsViaBackend, resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
+import { resolveUserTargetsViaExtension } from '../utils/extensionBridge';
 
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
 const GROUP_COLLECTIONS_KEY = 'zt_group_collections';
@@ -530,11 +530,12 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       let response = null;
       let lastError = null;
 
-      // Strategy 1: Try extension first (no local service needed)
+      // Strategy 1: Prefer backend/service flow using the saved cookie session.
       try {
-        response = await resolveGroupMembersViaExtension({
+        response = await resolveGroupInviteTargetsViaBackend({
           account: activeAccount,
           groups: groupPayload,
+          includeAllMembers: true,
         });
       } catch (error) {
         lastError = error;
@@ -560,7 +561,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         throw new Error(
           response?.error
             || lastError?.message
-            || 'Không thể tải danh sách thành viên nhóm. Hãy mở sẵn tab Zalo đúng tài khoản trước khi bật Hiển thị thành viên ẩn.'
+            || 'Không thể tải danh sách thành viên nhóm. Hãy đồng bộ lại tài khoản để cập nhật cookie/session rồi thử lại.'
         );
       }
 

@@ -1,7 +1,12 @@
 const DEFAULT_SERVICE_URL = import.meta.env.VITE_ZALO_SERVICE_URL || 'http://127.0.0.1:4517';
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 
 function buildUrl(path) {
   return DEFAULT_SERVICE_URL.replace(/\/$/, '') + path;
+}
+
+function buildBackendUrl(path) {
+  return API_BASE.replace(/\/$/, '') + path;
 }
 
 async function parseJson(response) {
@@ -43,6 +48,41 @@ export async function requestLocalZaloService(path, payload = {}, timeoutMs = 12
   }
 }
 
+export async function requestBackendZaloService(path, payload = {}, timeoutMs = 120000) {
+  if (!API_BASE) {
+    throw new Error('Backend chưa được cấu hình.');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(buildBackendUrl(path), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Agent': navigator.userAgent,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const data = await parseJson(response);
+    if (!response.ok) {
+      throw new Error(data?.error || `Backend trả về mã lỗi ${response.status}.`);
+    }
+
+    return data;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Backend Zalo service phản hồi quá chậm.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function checkLocalZaloService(timeoutMs = 2500) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -76,6 +116,10 @@ export function sendFriendRequestJobsViaLocalService(payload) {
 
 export function resolveGroupInviteTargetsViaLocalService(payload) {
   return requestLocalZaloService('/api/zalo/groups/invite-targets', payload, 180000);
+}
+
+export function resolveGroupInviteTargetsViaBackend(payload) {
+  return requestBackendZaloService('/api/zalo/groups/invite-targets', payload, 180000);
 }
 
 export function runAccountActionJobsViaLocalService(payload) {
