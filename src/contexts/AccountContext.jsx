@@ -13,7 +13,7 @@ import { syncZaloCommonData } from '../utils/zaloRequestBuilder';
 import { useAuth } from './AuthContext';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
-const STORAGE_KEY = 'zalotool_accounts';
+const STORAGE_KEY = 'zalotool_accounts_cache';
 const ACTIVE_KEY = 'zalotool_active_idx';
 const INITIAL_SYNC_STATE = {
   phase: 'idle',
@@ -61,45 +61,65 @@ function isExtensionInvalidationError(value) {
   return /extension context invalidated|tai lai trang sau khi reload extension/i.test(String(value || ''));
 }
 
-function loadAccounts() {
+function normalizeAccountRecord(account, index = 0) {
+  return {
+    id: account.id || account.zaloId || account.userId || account.cookie || `legacy_${index}`,
+    cookie: account.cookie || '',
+    cookies: Array.isArray(account.cookies) ? account.cookies : [],
+    cookieCount: account.cookieCount || 0,
+    name: account.name || account.displayName || account.zaloName || 'Tài khoản Zalo',
+    avatar: account.avatar || account.zaloAvatar || '',
+    phone: account.phone || account.phoneNumber || account.zaloPhone || '',
+    imei: account.imei || '',
+    userAgent: account.userAgent || navigator.userAgent,
+    decryptKey: account.decryptKey || '',
+    commonParams: account.commonParams || '',
+    labelVersion: account.labelVersion || null,
+    commonData: account.commonData || null,
+    userId: account.userId || account.zaloId || '',
+    UIN: account.UIN || '',
+    sessionSource: Array.isArray(account.sessionSource) ? account.sessionSource : [],
+    syncedAt: account.syncedAt || null,
+    friends: Array.isArray(account.friends) ? account.friends : [],
+    groups: Array.isArray(account.groups) ? account.groups : [],
+    sentFriendRequests: Array.isArray(account.sentFriendRequests) ? account.sentFriendRequests : [],
+    receivedFriendRequests: Array.isArray(account.receivedFriendRequests) ? account.receivedFriendRequests : [],
+    serviceSyncedAt: account.serviceSyncedAt || null,
+    syncStatus: getStoredAccountSyncStatus(account),
+    addedAt: account.addedAt || null,
+    lastUsedAt: account.lastUsedAt || null,
+  };
+}
+
+function buildAccountsStorageKey(googleUserId) {
+  return `${STORAGE_KEY}:${googleUserId || 'guest'}`;
+}
+
+function buildActiveStorageKey(googleUserId) {
+  return `${ACTIVE_KEY}:${googleUserId || 'guest'}`;
+}
+
+function loadAccounts(googleUserId) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(buildAccountsStorageKey(googleUserId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((account, index) => ({
-      id: account.id || account.userId || account.cookie || `legacy_${index}`,
-      cookie: account.cookie || '',
-      cookies: Array.isArray(account.cookies) ? account.cookies : [],
-      cookieCount: account.cookieCount || 0,
-      name: account.name || account.displayName || 'Tài khoản Zalo',
-      avatar: account.avatar || '',
-      phone: account.phone || account.phoneNumber || '',
-      imei: account.imei || '',
-      userAgent: account.userAgent || navigator.userAgent,
-      decryptKey: account.decryptKey || '',
-      commonParams: account.commonParams || '',
-      labelVersion: account.labelVersion || null,
-      commonData: account.commonData || null,
-      userId: account.userId || '',
-      UIN: account.UIN || '',
-      sessionSource: Array.isArray(account.sessionSource) ? account.sessionSource : [],
-      syncedAt: account.syncedAt || null,
-      friends: Array.isArray(account.friends) ? account.friends : [],
-      groups: Array.isArray(account.groups) ? account.groups : [],
-      sentFriendRequests: Array.isArray(account.sentFriendRequests) ? account.sentFriendRequests : [],
-      receivedFriendRequests: Array.isArray(account.receivedFriendRequests) ? account.receivedFriendRequests : [],
-      serviceSyncedAt: account.serviceSyncedAt || null,
-      syncStatus: getStoredAccountSyncStatus(account),
-    }));
+    return parsed.map((account, index) => normalizeAccountRecord(account, index));
   } catch { return []; }
 }
 
-function loadActiveIndex() {
+function clampActiveIndex(index, count) {
+  if (!count) return -1;
+  if (!Number.isFinite(index) || index < 0) return 0;
+  return Math.min(index, count - 1);
+}
+
+function loadActiveIndex(googleUserId, count = 0) {
   try {
-    const raw = localStorage.getItem(ACTIVE_KEY);
+    const raw = localStorage.getItem(buildActiveStorageKey(googleUserId));
     const idx = raw !== null ? Number(raw) : -1;
-    return Number.isFinite(idx) ? idx : -1;
+    return clampActiveIndex(idx, count);
   } catch { return -1; }
 }
 
@@ -109,13 +129,17 @@ function canSyncAccount(account) {
 
 // ─── Server-side account tracking helpers ────────────────
 
-async function serverRegisterAccount({ userId, zaloId, zaloName, zaloAvatar, zaloPhone }) {
+async function serverRegisterAccount({ userId, account }) {
+  const zaloId = account?.id || account?.userId || account?.zaloId || '';
+  const zaloName = account?.name || account?.displayName || account?.zaloName || '';
+  const zaloAvatar = account?.avatar || account?.zaloAvatar || '';
+  const zaloPhone = account?.phone || account?.phoneNumber || account?.zaloPhone || '';
   if (!API_BASE || !userId || !zaloId) return null;
   try {
     const res = await fetch(`${API_BASE}/api/accounts/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, zaloId, zaloName, zaloAvatar, zaloPhone }),
+      body: JSON.stringify({ userId, zaloId, zaloName, zaloAvatar, zaloPhone, accountData: account }),
     });
     return await res.json();
   } catch (e) {
@@ -140,12 +164,17 @@ async function serverRemoveAccount(userId, zaloId) {
 async function serverGetAccounts(userId) {
   if (!API_BASE || !userId) return [];
   try {
-    const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`);
+    const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`, { cache: 'no-store' });
     const data = await res.json();
     return data.ok ? data.accounts : [];
   } catch {
-    return [];
+    return null;
   }
+}
+
+async function persistAccountToServer(userId, account) {
+  if (!userId || !account?.id) return null;
+  return serverRegisterAccount({ userId, account });
 }
 
 const AccountContext = createContext(null);
@@ -160,8 +189,8 @@ export function AccountProvider({ children }) {
     ...INITIAL_EXTENSION_STATUS,
     ...getExtensionStatusSnapshot(),
   }));
-  const [accounts, setAccounts] = useState(loadAccounts);
-  const [activeAccountIndex, setActiveAccountIndex] = useState(loadActiveIndex);
+  const [accounts, setAccounts] = useState([]);
+  const [activeAccountIndex, setActiveAccountIndex] = useState(-1);
   const [syncState, setSyncState] = useState(INITIAL_SYNC_STATE);
   const [friends, setFriends] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -181,11 +210,56 @@ export function AccountProvider({ children }) {
     return count;
   }, [googleUserId]);
 
-  // Load server-side registered account count on login
   useEffect(() => {
-    if (!googleUserId) return;
-    refreshServerAccountCount();
-  }, [googleUserId, refreshServerAccountCount]);
+    let cancelled = false;
+
+    if (!googleUserId) {
+      setAccounts([]);
+      setActiveAccountIndex(-1);
+      setFriends([]);
+      setGroups([]);
+      setSentFriendRequests([]);
+      setReceivedFriendRequests([]);
+      setServerAccountCount(0);
+      return undefined;
+    }
+
+    const cachedAccounts = loadAccounts(googleUserId);
+    setAccounts(cachedAccounts);
+    setActiveAccountIndex(loadActiveIndex(googleUserId, cachedAccounts.length));
+    setServerAccountCount(cachedAccounts.length);
+
+    (async () => {
+      const remoteAccounts = await serverGetAccounts(googleUserId);
+      if (cancelled) return;
+      if (!Array.isArray(remoteAccounts)) return;
+      const normalized = remoteAccounts.map((account, index) => normalizeAccountRecord(account, index));
+      const cachedById = new Map(cachedAccounts.map((account) => [account.id, account]));
+      const merged = normalized.map((account) => {
+        const cached = cachedById.get(account.id);
+        if (cached && !hasStoredSession(account) && hasStoredSession(cached)) {
+          return { ...account, ...cached };
+        }
+        return account;
+      });
+      const missingRemote = cachedAccounts.filter((account) => !normalized.some((remote) => remote.id === account.id));
+      const nextAccounts = [...merged, ...missingRemote];
+
+      setAccounts(nextAccounts);
+      setActiveAccountIndex(loadActiveIndex(googleUserId, nextAccounts.length));
+      setServerAccountCount(nextAccounts.length);
+
+      for (const account of nextAccounts) {
+        if (hasStoredSession(account)) {
+          persistAccountToServer(googleUserId, account).catch(() => {});
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleUserId]);
 
   const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
   const syncing = isBusySyncPhase(syncState.phase);
@@ -223,16 +297,17 @@ export function AccountProvider({ children }) {
     }
   }, [accounts, activeAccountIndex]);
 
-  // Persist accounts to localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts.map((account) => ({
+    if (!googleUserId) return;
+    localStorage.setItem(buildAccountsStorageKey(googleUserId), JSON.stringify(accounts.map((account) => ({
       ...account,
       cookie: '',
     }))));
-  }, [accounts]);
+  }, [accounts, googleUserId]);
   useEffect(() => {
-    localStorage.setItem(ACTIVE_KEY, String(activeAccountIndex));
-  }, [activeAccountIndex]);
+    if (!googleUserId) return;
+    localStorage.setItem(buildActiveStorageKey(googleUserId), String(activeAccountIndex));
+  }, [activeAccountIndex, googleUserId]);
 
   // Check extension on mount + periodic re-check
   useEffect(() => {
@@ -363,13 +438,7 @@ export function AccountProvider({ children }) {
 
         // Register account server-side for limit enforcement
         if (googleUserId) {
-          serverRegisterAccount({
-            userId: googleUserId,
-            zaloId: accountId,
-            zaloName: incomingAccount.name,
-            zaloAvatar: incomingAccount.avatar,
-            zaloPhone: incomingAccount.phone,
-          }).then((result) => {
+          persistAccountToServer(googleUserId, incomingAccount).then((result) => {
             if (result?.ok) {
               refreshServerAccountCount();
             }
@@ -466,17 +535,23 @@ export function AccountProvider({ children }) {
         const sentReqs = Array.isArray(d.sentFriendRequests) ? d.sentFriendRequests : [];
         const recvReqs = Array.isArray(d.receivedFriendRequests) ? d.receivedFriendRequests : [];
         if (sentReqs.length || recvReqs.length) {
-          updateAccountById(acct.id, { sentFriendRequests: sentReqs, receivedFriendRequests: recvReqs });
+          const patch = { sentFriendRequests: sentReqs, receivedFriendRequests: recvReqs };
+          updateAccountById(acct.id, patch);
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
           setSentFriendRequests(sentReqs);
           setReceivedFriendRequests(recvReqs);
         }
         // Also update friends/groups if backend returned more data
         if (Array.isArray(d.friends) && d.friends.length) {
-          updateAccountById(acct.id, { friends: d.friends });
+          const patch = { friends: d.friends };
+          updateAccountById(acct.id, patch);
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
           setFriends(d.friends);
         }
         if (Array.isArray(d.groups) && d.groups.length) {
-          updateAccountById(acct.id, { groups: d.groups });
+          const patch = { groups: d.groups };
+          updateAccountById(acct.id, patch);
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
           setGroups(d.groups);
         }
       } catch (_) { /* silent — friend requests are optional */ }
@@ -625,10 +700,12 @@ export function AccountProvider({ children }) {
 
     const extensionPatch = await refreshAccountSessionFromExtension(activeAccount);
     if (extensionPatch) {
+      const nextAccount = { ...activeAccount, ...extensionPatch };
       updateAccountById(activeAccount.id, extensionPatch);
+      if (googleUserId) await persistAccountToServer(googleUserId, nextAccount);
     }
     return extensionPatch;
-  }, [accounts, activeAccountIndex, refreshAccountSessionFromExtension, updateAccountById]);
+  }, [accounts, activeAccountIndex, googleUserId, refreshAccountSessionFromExtension, updateAccountById]);
 
   const refreshAccountViaBackend = useCallback(async () => {
     const acct = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
@@ -662,13 +739,16 @@ export function AccountProvider({ children }) {
     };
 
     updateAccountById(acct.id, patch);
+    if (googleUserId) {
+      await persistAccountToServer(googleUserId, { ...acct, ...patch });
+    }
     if (patch.friends.length) setFriends(patch.friends);
     if (patch.groups.length) setGroups(patch.groups);
     setSentFriendRequests(patch.sentFriendRequests);
     setReceivedFriendRequests(patch.receivedFriendRequests);
 
     return patch;
-  }, [accounts, activeAccountIndex, updateAccountById]);
+  }, [accounts, activeAccountIndex, googleUserId, updateAccountById]);
 
   const value = {
     extensionActive,
