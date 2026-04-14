@@ -9,7 +9,6 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
 import { useAccount } from '../contexts/AccountContext';
 import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 
@@ -24,7 +23,6 @@ export default function AccountsPage() {
     removeAccount,
   } = useAccount();
   const { subscription, planKey, maxAccounts, isActive, isExpired, daysLeft } = useSubscription();
-  const navigate = useNavigate();
   const [feedback, setFeedback] = useState(null);
 
   const handleRefresh = async () => {
