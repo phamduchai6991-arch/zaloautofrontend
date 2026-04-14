@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Paper, Button } from '@mui/material';
+import { Box, Typography, Paper, Button, Alert } from '@mui/material';
 import { GoogleLogin, useGoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,45 +9,54 @@ export default function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
   const [showFallback, setShowFallback] = React.useState(false);
+  const [loginError, setLoginError] = React.useState('');
 
   // Already logged in → redirect back
   React.useEffect(() => {
     if (user) navigate('/reach', { replace: true });
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Show fallback button if Google One Tap doesn't render within 3s
+  // Show fallback button if Google One Tap doesn't render within 2s
   React.useEffect(() => {
-    const timer = setTimeout(() => setShowFallback(true), 3000);
+    const timer = setTimeout(() => setShowFallback(true), 2000);
     return () => clearTimeout(timer);
   }, []);
 
   const handleSuccess = (credentialResponse) => {
-    const decoded = jwtDecode(credentialResponse.credential);
-    login({
-      name: decoded.name,
-      email: decoded.email,
-      picture: decoded.picture,
-      sub: decoded.sub,
-    });
-    navigate('/reach', { replace: true });
+    try {
+      const decoded = jwtDecode(credentialResponse.credential);
+      login({
+        name: decoded.name,
+        email: decoded.email,
+        picture: decoded.picture,
+        sub: decoded.sub,
+      });
+      navigate('/reach', { replace: true });
+    } catch (e) {
+      setLoginError('Lỗi xử lý token đăng nhập. Hãy thử lại.');
+    }
   };
 
   // Fallback: OAuth popup flow (fetches user info from Google API)
   const googleLogin = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
-      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-      });
-      const profile = await res.json();
-      login({
-        name: profile.name,
-        email: profile.email,
-        picture: profile.picture,
-        sub: profile.sub,
-      });
-      navigate('/reach', { replace: true });
+      try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+        });
+        const profile = await res.json();
+        login({
+          name: profile.name,
+          email: profile.email,
+          picture: profile.picture,
+          sub: profile.sub,
+        });
+        navigate('/reach', { replace: true });
+      } catch (e) {
+        setLoginError('Không lấy được thông tin tài khoản Google. Hãy thử lại.');
+      }
     },
-    onError: () => console.error('Google login failed'),
+    onError: () => setLoginError('Đăng nhập Google thất bại. Hãy thử lại.'),
   });
 
   return (
@@ -87,6 +96,9 @@ export default function LoginPage() {
         </Typography>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          {loginError && (
+            <Alert severity="error" sx={{ width: '100%', mb: 1 }}>{loginError}</Alert>
+          )}
           <GoogleLogin
             onSuccess={handleSuccess}
             onError={() => setShowFallback(true)}
@@ -99,7 +111,7 @@ export default function LoginPage() {
           {showFallback && (
             <Button
               variant="outlined"
-              onClick={() => googleLogin()}
+              onClick={() => { setLoginError(''); googleLogin(); }}
               sx={{
                 textTransform: 'none',
                 borderRadius: 2,

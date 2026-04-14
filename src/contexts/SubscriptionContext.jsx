@@ -78,7 +78,7 @@ export function SubscriptionProvider({ children }) {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/payment/subscription/${encodeURIComponent(user.sub)}`);
+      const res = await fetch(`${API_BASE}/api/payment/subscription/${encodeURIComponent(user.sub)}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const nextSubscription = data.subscription || null;
