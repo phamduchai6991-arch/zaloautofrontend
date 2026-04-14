@@ -548,6 +548,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [rotationBatchSize, setRotationBatchSize] = useState('100');
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [rotateMessageEvery, setRotateMessageEvery] = useState('100');
+  const [autoAiContent, setAutoAiContent] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [showExtDialog, setShowExtDialog] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
@@ -892,6 +894,42 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
     setRewriteDialog({ open: false, target: 'message', options: [] });
   };
+
+  // Auto AI content generation
+  const generateAiContent = useCallback(async () => {
+    if (!canUsePlanFeature('ai_rewrite', planKey)) return;
+    setAiGenerating(true);
+    try {
+      // Generate friend request content
+      const seedText = friendRequest.trim() || 'Chào bạn, mình muốn kết bạn nhé!';
+      const friendOptions = await fetchAiRewrite(seedText, 'friend');
+      if (friendOptions && friendOptions.length > 0) {
+        setFriendRequest(friendOptions[0].slice(0, 150));
+      }
+      // If rotation enabled, also generate rotation templates
+      if (rotationEnabled && accounts.length > 1) {
+        const rotationOptions = await fetchAiRewrite(seedText, 'rotation');
+        if (rotationOptions && rotationOptions.length > 0) {
+          setMessageTemplates(rotationOptions);
+        } else {
+          setMessageTemplates(buildRotationFallback(seedText));
+        }
+      }
+      setFeedback({ severity: 'success', message: 'AI đã tự động tạo nội dung kết bạn.' });
+    } catch (_) {
+      setFeedback({ severity: 'error', message: 'Không thể tạo nội dung bằng AI.' });
+    } finally {
+      setAiGenerating(false);
+    }
+  }, [friendRequest, rotationEnabled, accounts.length, planKey]);
+
+  // Auto-trigger when toggle is turned on
+  useEffect(() => {
+    if (autoAiContent && !aiGenerating) {
+      generateAiContent();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAiContent]);
 
 
 
@@ -1947,6 +1985,22 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             size="small"
             disabled={!hasAccount}
           />
+          <Tooltip title={!canUsePlanFeature('ai_rewrite', planKey) ? `Yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên` : 'Bật để AI tự động viết nội dung lời mời kết bạn và mẫu tin nhắn luân phiên'} arrow>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, ml: 1, cursor: 'pointer', opacity: !canUsePlanFeature('ai_rewrite', planKey) ? 0.5 : 1 }}>
+              <AiIcon fontSize="small" sx={{ color: autoAiContent ? 'primary.main' : 'text.secondary', fontSize: 18 }} />
+              <Typography variant="caption" fontWeight={600} color={autoAiContent ? 'primary.main' : 'text.secondary'}>
+                AI tự động
+              </Typography>
+              <Switch
+                checked={autoAiContent}
+                onChange={(event) => setAutoAiContent(event.target.checked)}
+                color="primary"
+                size="small"
+                disabled={!canUsePlanFeature('ai_rewrite', planKey) || !ketBanEnabled}
+              />
+              {aiGenerating && <CircularProgress size={14} sx={{ ml: 0.5 }} />}
+            </Box>
+          </Tooltip>
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -1984,6 +2038,25 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
                 }}
               >
                 AI viết lại
+              </Button>
+              </span>
+            </Tooltip>
+            {autoAiContent && (
+              <Button
+                size="small"
+                startIcon={aiGenerating ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
+                disabled={aiGenerating}
+                onClick={generateAiContent}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: '0.8rem',
+                  borderRadius: '16px',
+                  px: 1.5,
+                }}
+              >
+                Tạo lại
+              </Button>
+            )}
               </Button>
               </span>
             </Tooltip>
