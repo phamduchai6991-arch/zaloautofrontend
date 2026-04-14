@@ -532,6 +532,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [showExtDialog, setShowExtDialog] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
+  const [running, setRunning] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
   const [settingsMenuAnchor, setSettingsMenuAnchor] = useState(null);
@@ -829,6 +830,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
 
   const handleStart = async () => {
+    if (running) return;
+    setRunning(true);
+    try {
     if (!isActive) {
       setFeedback({
         severity: 'warning',
@@ -1455,6 +1459,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         message: summaries.map((item) => item.message).join(' '),
       });
     }
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -2079,7 +2086,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           variant="contained"
           size="large"
           type="button"
-          endIcon={<SendIcon />}
+          disabled={running}
+          endIcon={running ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : <SendIcon />}
           onClick={handleStart}
           sx={{
             width: 200,
@@ -2087,13 +2095,14 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             fontWeight: 700,
             fontSize: '0.9rem',
             borderRadius: '8px',
-            bgcolor: 'rgb(32,101,209)',
+            bgcolor: running ? '#919EAB' : 'rgb(32,101,209)',
             boxShadow: 'none',
             textTransform: 'none',
-            '&:hover': { bgcolor: 'rgb(24, 80, 170)' },
+            '&:hover': { bgcolor: running ? '#919EAB' : 'rgb(24, 80, 170)' },
+            '&.Mui-disabled': { bgcolor: '#919EAB', color: '#fff' },
           }}
         >
-          Bắt Đầu
+          {running ? 'Đang chạy...' : 'Bắt Đầu'}
         </Button>
 
         <Box sx={{ position: 'relative' }}>
