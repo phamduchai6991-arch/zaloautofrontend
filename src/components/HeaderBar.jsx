@@ -29,6 +29,10 @@ export default function HeaderBar() {
   const { planKey, isActive, loading } = useSubscription();
   const [anchorEl, setAnchorEl] = useState(null);
 
+  const openLoginPage = () => {
+    window.location.assign('/login');
+  };
+
   const planLabel = user
     ? (loading && !planKey
       ? '...'
@@ -43,14 +47,14 @@ export default function HeaderBar() {
     if (user) {
       setAnchorEl(e.currentTarget);
     } else {
-      navigate('/login');
+      openLoginPage();
     }
   };
 
   const handleLogout = () => {
     setAnchorEl(null);
     logout();
-    navigate('/login');
+    openLoginPage();
   };
 
   return (
