@@ -142,6 +142,8 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
             pollRef.current = null;
             setOrder(data.order);
             setStep('success');
+            // Notify subscription context to refresh plan state
+            window.dispatchEvent(new CustomEvent('autozalo:subscription-changed'));
             return;
           }
 
@@ -170,6 +172,15 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
       pollStartedAtRef.current = Date.now();
       pollFailCountRef.current = 0;
       pollRef.current = setInterval(() => {
+        // Timeout: stop auto-poll after MAX_POLL_MS
+        if (Date.now() - pollStartedAtRef.current > MAX_POLL_MS) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setError('Hết thời gian chờ xác nhận thanh toán. Nếu bạn đã chuyển khoản, hãy mở lại đơn hàng hoặc liên hệ hỗ trợ.');
+          setStep('error');
+          return;
+        }
+
         fetch(`${API_BASE}/api/payment/orders/${order.code}`, { cache: 'no-store' })
           .then((r) => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -182,6 +193,8 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
               pollRef.current = null;
               setOrder(data.order);
               setStep('success');
+              // Notify subscription context to refresh plan state
+              window.dispatchEvent(new CustomEvent('autozalo:subscription-changed'));
             } else if (data.ok && data.order.status === 'expired') {
               clearInterval(pollRef.current);
               pollRef.current = null;
@@ -191,6 +204,12 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
           })
           .catch(() => {
             pollFailCountRef.current += 1;
+            if (pollFailCountRef.current >= 12) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setError('Mất kết nối với server. Hãy kiểm tra mạng rồi thử lại.');
+              setStep('error');
+            }
           });
       }, 5000);
     }
