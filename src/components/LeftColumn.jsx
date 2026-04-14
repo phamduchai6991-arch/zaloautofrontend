@@ -550,6 +550,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [rotateMessageEvery, setRotateMessageEvery] = useState('100');
   const [autoAiContent, setAutoAiContent] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [autoAiMessage, setAutoAiMessage] = useState(false);
+  const [aiMsgGenerating, setAiMsgGenerating] = useState(false);
+  const [msgTemplates, setMsgTemplates] = useState([]);
+  const [rotateMsgEvery, setRotateMsgEvery] = useState('100');
   const [showExtDialog, setShowExtDialog] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
@@ -858,7 +862,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setFeedback({ severity: 'warning', message: `Viết lại bằng AI yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên. Vui lòng nâng cấp để sử dụng.` });
       return;
     }
-    const sourceText = target === 'friend' ? friendRequest : target === 'rotation' ? (friendRequest || 'Chào bạn, mình muốn kết bạn!') : message;
+    const sourceText = target === 'friend' ? friendRequest : target === 'rotation' ? (friendRequest || 'Chào bạn, mình muốn kết bạn!') : target === 'message_rotation' ? (message || 'Chào bạn, mình có thông tin muốn chia sẻ!') : message;
     if (!sourceText.trim()) {
       setFeedback({ severity: 'warning', message: 'Cần nhập nội dung trước khi viết lại.' });
       return;
@@ -870,7 +874,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setRewriteDialog({ open: true, target, options: aiOptions, loading: false });
     } else {
       // Fallback to static options if AI unavailable
-      const fallback = target === 'rotation' ? buildRotationFallback(sourceText) : buildRewriteOptions(sourceText);
+      const fallback = (target === 'rotation' || target === 'message_rotation') ? buildRotationFallback(sourceText) : buildRewriteOptions(sourceText);
       setRewriteDialog({ open: true, target, options: fallback, loading: false });
     }
   };
@@ -887,6 +891,15 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       } else {
         // Add single option to templates
         setMessageTemplates((prev) => [...prev, value]);
+        setFeedback({ severity: 'success', message: 'Đã thêm 1 mẫu tin nhắn.' });
+      }
+    } else if (rewriteDialog.target === 'message_rotation') {
+      if (value === '__all__') {
+        const allOptions = rewriteDialog.options.filter((o) => typeof o === 'string' && o.trim());
+        setMsgTemplates(allOptions);
+        setFeedback({ severity: 'success', message: `Đã tạo ${allOptions.length} mẫu tin nhắn luân phiên.` });
+      } else {
+        setMsgTemplates((prev) => [...prev, value]);
         setFeedback({ severity: 'success', message: 'Đã thêm 1 mẫu tin nhắn.' });
       }
     } else {
@@ -928,6 +941,39 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAiContent]);
+
+  // Auto AI message content generation
+  const generateAiMessage = useCallback(async () => {
+    if (!canUsePlanFeature('ai_rewrite', planKey)) return;
+    setAiMsgGenerating(true);
+    try {
+      const seedText = message.trim() || 'Chào bạn, mình có thông tin muốn chia sẻ với bạn.';
+      // Generate main message
+      const msgOptions = await fetchAiRewrite(seedText, 'message');
+      if (msgOptions && msgOptions.length > 0) {
+        setMessage(msgOptions[0]);
+      }
+      // Generate varied templates for anti-spam
+      const rotOptions = await fetchAiRewrite(seedText, 'message_rotation');
+      if (rotOptions && rotOptions.length > 0) {
+        setMsgTemplates(rotOptions);
+      } else {
+        setMsgTemplates([seedText]);
+      }
+      setFeedback({ severity: 'success', message: 'AI đã tự động tạo nội dung tin nhắn và mẫu luân phiên.' });
+    } catch (_) {
+      setFeedback({ severity: 'error', message: 'Không thể tạo nội dung tin nhắn bằng AI.' });
+    } finally {
+      setAiMsgGenerating(false);
+    }
+  }, [message, planKey]);
+
+  useEffect(() => {
+    if (autoAiMessage && !aiMsgGenerating) {
+      generateAiMessage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAiMessage]);
 
 
 
@@ -1522,6 +1568,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               account: activeAccount,
               jobs: messageRecords,
               ...(filesPayload.length > 0 ? { files: filesPayload } : {}),
+              messageTemplates: msgTemplates.length > 0 ? msgTemplates : [],
+              rotateMessageEvery: Math.max(1, parseInt(rotateMsgEvery, 10) || 100),
             }),
           });
 
@@ -1905,7 +1953,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             </Box>
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-              {rewriteDialog.target === 'rotation' && rewriteDialog.options.length > 1 && (
+              {(rewriteDialog.target === 'rotation' || rewriteDialog.target === 'message_rotation') && rewriteDialog.options.length > 1 && (
                 <Button
                   variant="contained"
                   color="primary"
@@ -2073,6 +2121,43 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             onChange={(event) => setNhanTinEnabled(event.target.checked)}
             size="small"
           />
+          {canUsePlanFeature('ai_rewrite', planKey) && (
+            <>
+              <Tooltip title="AI tự động tạo nội dung tin nhắn và mẫu luân phiên chống spam" arrow>
+                <Button
+                  size="small"
+                  startIcon={aiMsgGenerating ? <CircularProgress size={14} /> : <AiIcon fontSize="small" />}
+                  onClick={() => setAutoAiMessage((prev) => !prev)}
+                  disabled={aiMsgGenerating}
+                  sx={{
+                    textTransform: 'none',
+                    fontSize: '0.8rem',
+                    borderRadius: '16px',
+                    px: 1.5,
+                    color: autoAiMessage ? 'primary.main' : 'text.secondary',
+                    bgcolor: autoAiMessage ? 'primary.50' : undefined,
+                  }}
+                >
+                  AI tự động
+                </Button>
+              </Tooltip>
+              {autoAiMessage && (
+                <Button
+                  size="small"
+                  disabled={aiMsgGenerating}
+                  onClick={generateAiMessage}
+                  sx={{
+                    textTransform: 'none',
+                    fontSize: '0.8rem',
+                    borderRadius: '16px',
+                    px: 1.5,
+                  }}
+                >
+                  Tạo lại
+                </Button>
+              )}
+            </>
+          )}
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -2182,6 +2267,52 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             {selectedFiles.map((file) => (
               <Chip key={`${file.name}-${file.size}`} label={file.name} onDelete={() => setSelectedFiles((prev) => prev.filter((item) => item !== file))} />
             ))}
+          </Box>
+        )}
+
+        {/* Message template rotation (when AI auto or templates exist) */}
+        {(autoAiMessage || msgTemplates.length > 0) && (
+          <Box sx={{ mt: 1.5, p: 1, bgcolor: 'action.hover', borderRadius: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+              <Typography variant="caption" fontWeight={600}>Đổi nội dung mỗi:</Typography>
+              <TextField
+                value={rotateMsgEvery}
+                onChange={(event) => setRotateMsgEvery(event.target.value)}
+                size="small"
+                type="number"
+                sx={{ width: 64, '& .MuiInputBase-input': { py: 0.5, px: 0.75, fontSize: '0.75rem' } }}
+                inputProps={{ min: 1 }}
+              />
+              <Typography variant="caption" color="text.secondary">tin nhắn</Typography>
+            </Box>
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              maxRows={4}
+              size="small"
+              value={msgTemplates.join('\n')}
+              onChange={(event) => setMsgTemplates(event.target.value.split('\n').filter((l) => l.trim()))}
+              placeholder={'Chào bạn, mình có thông tin hay muốn chia sẻ!\nHi bạn, mình gửi tin nhắn nhé!\nXin chào, mình muốn nhắn tin cho bạn!'}
+              helperText={msgTemplates.length > 0 ? `${msgTemplates.length} mẫu tin nhắn — đổi nội dung mỗi ${rotateMsgEvery} tin` : 'Để trống = dùng nội dung mặc định'}
+              sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
+            />
+            <Button
+              size="small"
+              startIcon={<AiIcon fontSize="small" />}
+              onClick={() => openRewriteDialog('message_rotation')}
+              disabled={!canUsePlanFeature('ai_rewrite', planKey)}
+              sx={{
+                textTransform: 'none',
+                fontSize: '0.75rem',
+                borderRadius: '16px',
+                px: 1.5,
+                mt: 0.5,
+                alignSelf: 'flex-start',
+              }}
+            >
+              AI tạo mẫu chống spam
+            </Button>
           </Box>
         )}
       </Box>
