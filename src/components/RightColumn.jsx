@@ -535,7 +535,6 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         response = await resolveGroupMembersViaExtension({
           account: activeAccount,
           groups: groupPayload,
-          allowCreateTab: false,
         });
       } catch (error) {
         lastError = error;

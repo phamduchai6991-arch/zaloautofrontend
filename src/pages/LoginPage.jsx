@@ -20,12 +20,18 @@ export default function LoginPage() {
   const handleSuccess = (credentialResponse) => {
     try {
       const decoded = jwtDecode(credentialResponse.credential);
-      login({
-        name: decoded.name,
-        email: decoded.email,
-        picture: decoded.picture,
-        sub: decoded.sub,
-      });
+      login(
+        {
+          name: decoded.name,
+          email: decoded.email,
+          picture: decoded.picture,
+          sub: decoded.sub,
+        },
+        {
+          authType: 'google-id-token',
+          authToken: credentialResponse.credential,
+        },
+      );
       navigate('/reach', { replace: true });
     } catch (e) {
       setLoginError('Lỗi xử lý token đăng nhập. Hãy thử lại.');
@@ -40,12 +46,18 @@ export default function LoginPage() {
           headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
         });
         const profile = await res.json();
-        login({
-          name: profile.name,
-          email: profile.email,
-          picture: profile.picture,
-          sub: profile.sub,
-        });
+        login(
+          {
+            name: profile.name,
+            email: profile.email,
+            picture: profile.picture,
+            sub: profile.sub,
+          },
+          {
+            authType: 'google-access-token',
+            authToken: tokenResponse.access_token,
+          },
+        );
         navigate('/reach', { replace: true });
       } catch (e) {
         setLoginError('Không lấy được thông tin tài khoản Google. Hãy thử lại.');

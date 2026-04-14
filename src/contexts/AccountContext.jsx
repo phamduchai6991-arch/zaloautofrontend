@@ -15,6 +15,7 @@ import { useAuth } from './AuthContext';
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const STORAGE_KEY = 'zalotool_accounts_cache';
 const ACTIVE_KEY = 'zalotool_active_idx';
+const MIGRATION_KEY = 'zalotool_accounts_migrated';
 const INITIAL_SYNC_STATE = {
   phase: 'idle',
   requestId: null,
@@ -99,6 +100,10 @@ function buildActiveStorageKey(googleUserId) {
   return `${ACTIVE_KEY}:${googleUserId || 'guest'}`;
 }
 
+function buildMigrationStorageKey(googleUserId) {
+  return `${MIGRATION_KEY}:${googleUserId || 'guest'}`;
+}
+
 function loadAccounts(googleUserId) {
   try {
     const raw = localStorage.getItem(buildAccountsStorageKey(googleUserId));
@@ -129,7 +134,7 @@ function canSyncAccount(account) {
 
 // ─── Server-side account tracking helpers ────────────────
 
-async function serverRegisterAccount({ userId, account }) {
+async function serverRegisterAccount({ userId, account, authHeaders = {} }) {
   const zaloId = account?.id || account?.userId || account?.zaloId || '';
   const zaloName = account?.name || account?.displayName || account?.zaloName || '';
   const zaloAvatar = account?.avatar || account?.zaloAvatar || '';
@@ -138,7 +143,7 @@ async function serverRegisterAccount({ userId, account }) {
   try {
     const res = await fetch(`${API_BASE}/api/accounts/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ userId, zaloId, zaloName, zaloAvatar, zaloPhone, accountData: account }),
     });
     return await res.json();
@@ -148,12 +153,12 @@ async function serverRegisterAccount({ userId, account }) {
   }
 }
 
-async function serverRemoveAccount(userId, zaloId) {
+async function serverRemoveAccount(userId, zaloId, authHeaders = {}) {
   if (!API_BASE || !userId || !zaloId) return;
   try {
     await fetch(`${API_BASE}/api/accounts/remove`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ userId, zaloId }),
     });
   } catch (e) {
@@ -161,10 +166,13 @@ async function serverRemoveAccount(userId, zaloId) {
   }
 }
 
-async function serverGetAccounts(userId) {
+async function serverGetAccounts(userId, authHeaders = {}) {
   if (!API_BASE || !userId) return [];
   try {
-    const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`, { cache: 'no-store' });
+    const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`, {
+      cache: 'no-store',
+      headers: { ...authHeaders },
+    });
     const data = await res.json();
     return data.ok ? data.accounts : [];
   } catch {
@@ -172,15 +180,15 @@ async function serverGetAccounts(userId) {
   }
 }
 
-async function persistAccountToServer(userId, account) {
+async function persistAccountToServer(userId, account, authHeaders = {}) {
   if (!userId || !account?.id) return null;
-  return serverRegisterAccount({ userId, account });
+  return serverRegisterAccount({ userId, account, authHeaders });
 }
 
 const AccountContext = createContext(null);
 
 export function AccountProvider({ children }) {
-  const { user } = useAuth();
+  const { user, getAuthHeaders } = useAuth();
   const googleUserId = user?.sub || '';
   const extensionInvalidatedRef = useRef(false);
   const [extensionActive, setExtensionActive] = useState(false);
@@ -204,11 +212,11 @@ export function AccountProvider({ children }) {
       return 0;
     }
 
-    const list = await serverGetAccounts(googleUserId);
+    const list = await serverGetAccounts(googleUserId, getAuthHeaders());
     const count = Array.isArray(list) ? list.length : 0;
     setServerAccountCount(count);
     return count;
-  }, [googleUserId]);
+  }, [getAuthHeaders, googleUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,12 +233,15 @@ export function AccountProvider({ children }) {
     }
 
     const cachedAccounts = loadAccounts(googleUserId);
+    const migrationKey = buildMigrationStorageKey(googleUserId);
+    const migrationDone = localStorage.getItem(migrationKey) === '1';
     setAccounts(cachedAccounts);
     setActiveAccountIndex(loadActiveIndex(googleUserId, cachedAccounts.length));
     setServerAccountCount(cachedAccounts.length);
 
     (async () => {
-      const remoteAccounts = await serverGetAccounts(googleUserId);
+      const authHeaders = getAuthHeaders();
+      const remoteAccounts = await serverGetAccounts(googleUserId, authHeaders);
       if (cancelled) return;
       if (!Array.isArray(remoteAccounts)) return;
       const normalized = remoteAccounts.map((account, index) => normalizeAccountRecord(account, index));
@@ -242,16 +253,30 @@ export function AccountProvider({ children }) {
         }
         return account;
       });
-      const missingRemote = cachedAccounts.filter((account) => !normalized.some((remote) => remote.id === account.id));
-      const nextAccounts = [...merged, ...missingRemote];
+
+      const canBackfillServer = Boolean(authHeaders.Authorization);
+      const shouldUseLegacyCacheTemporarily = !migrationDone && normalized.length === 0 && cachedAccounts.length > 0;
+      const shouldBackfillLegacyCache = shouldUseLegacyCacheTemporarily && canBackfillServer && cachedAccounts.some((account) => hasStoredSession(account));
+      const nextAccounts = shouldUseLegacyCacheTemporarily ? cachedAccounts : merged;
 
       setAccounts(nextAccounts);
       setActiveAccountIndex(loadActiveIndex(googleUserId, nextAccounts.length));
       setServerAccountCount(nextAccounts.length);
 
-      for (const account of nextAccounts) {
-        if (hasStoredSession(account)) {
-          persistAccountToServer(googleUserId, account).catch(() => {});
+      if (shouldBackfillLegacyCache) {
+        const results = await Promise.allSettled(
+          nextAccounts
+            .filter((account) => hasStoredSession(account))
+            .map((account) => persistAccountToServer(googleUserId, account, authHeaders)),
+        );
+        if (results.some((result) => result.status === 'fulfilled')) {
+          localStorage.setItem(migrationKey, '1');
+        }
+      } else {
+        for (const account of nextAccounts) {
+          if (hasStoredSession(account)) {
+            persistAccountToServer(googleUserId, account, authHeaders).catch(() => {});
+          }
         }
       }
     })();
@@ -259,7 +284,7 @@ export function AccountProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [googleUserId]);
+  }, [getAuthHeaders, googleUserId]);
 
   const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
   const syncing = isBusySyncPhase(syncState.phase);
@@ -302,6 +327,13 @@ export function AccountProvider({ children }) {
     localStorage.setItem(buildAccountsStorageKey(googleUserId), JSON.stringify(accounts.map((account) => ({
       ...account,
       cookie: '',
+      cookies: [],
+      imei: '',
+      decryptKey: '',
+      commonParams: '',
+      commonData: null,
+      sessionSource: [],
+      UIN: '',
     }))));
   }, [accounts, googleUserId]);
   useEffect(() => {
@@ -438,7 +470,7 @@ export function AccountProvider({ children }) {
 
         // Register account server-side for limit enforcement
         if (googleUserId) {
-          persistAccountToServer(googleUserId, incomingAccount).then((result) => {
+          persistAccountToServer(googleUserId, incomingAccount, getAuthHeaders()).then((result) => {
             if (result?.ok) {
               refreshServerAccountCount();
             }
@@ -537,7 +569,7 @@ export function AccountProvider({ children }) {
         if (sentReqs.length || recvReqs.length) {
           const patch = { sentFriendRequests: sentReqs, receivedFriendRequests: recvReqs };
           updateAccountById(acct.id, patch);
-          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
           setSentFriendRequests(sentReqs);
           setReceivedFriendRequests(recvReqs);
         }
@@ -545,13 +577,13 @@ export function AccountProvider({ children }) {
         if (Array.isArray(d.friends) && d.friends.length) {
           const patch = { friends: d.friends };
           updateAccountById(acct.id, patch);
-          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
           setFriends(d.friends);
         }
         if (Array.isArray(d.groups) && d.groups.length) {
           const patch = { groups: d.groups };
           updateAccountById(acct.id, patch);
-          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch });
+          if (googleUserId) persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
           setGroups(d.groups);
         }
       } catch (_) { /* silent — friend requests are optional */ }
@@ -688,11 +720,11 @@ export function AccountProvider({ children }) {
     }
     // Remove from server-side tracking
     if (googleUserId && removedAccount?.id) {
-      serverRemoveAccount(googleUserId, removedAccount.id).then(() => {
+      serverRemoveAccount(googleUserId, removedAccount.id, getAuthHeaders()).then(() => {
         setServerAccountCount((prev) => Math.max(0, prev - 1));
       });
     }
-  }, [activeAccountIndex, accounts, googleUserId]);
+  }, [activeAccountIndex, accounts, getAuthHeaders, googleUserId]);
 
   const refreshActiveAccountFromService = useCallback(async () => {
     const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
@@ -702,10 +734,10 @@ export function AccountProvider({ children }) {
     if (extensionPatch) {
       const nextAccount = { ...activeAccount, ...extensionPatch };
       updateAccountById(activeAccount.id, extensionPatch);
-      if (googleUserId) await persistAccountToServer(googleUserId, nextAccount);
+      if (googleUserId) await persistAccountToServer(googleUserId, nextAccount, getAuthHeaders());
     }
     return extensionPatch;
-  }, [accounts, activeAccountIndex, googleUserId, refreshAccountSessionFromExtension, updateAccountById]);
+  }, [accounts, activeAccountIndex, getAuthHeaders, googleUserId, refreshAccountSessionFromExtension, updateAccountById]);
 
   const refreshAccountViaBackend = useCallback(async () => {
     const acct = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
@@ -740,7 +772,7 @@ export function AccountProvider({ children }) {
 
     updateAccountById(acct.id, patch);
     if (googleUserId) {
-      await persistAccountToServer(googleUserId, { ...acct, ...patch });
+      await persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
     }
     if (patch.friends.length) setFriends(patch.friends);
     if (patch.groups.length) setGroups(patch.groups);
@@ -748,7 +780,7 @@ export function AccountProvider({ children }) {
     setReceivedFriendRequests(patch.receivedFriendRequests);
 
     return patch;
-  }, [accounts, activeAccountIndex, googleUserId, updateAccountById]);
+  }, [accounts, activeAccountIndex, getAuthHeaders, googleUserId, updateAccountById]);
 
   const value = {
     extensionActive,

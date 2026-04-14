@@ -23,6 +23,17 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
+  const getAuthHeaders = React.useCallback(() => {
+    if (!user?.authToken || !user?.authType) {
+      return {};
+    }
+
+    return {
+      Authorization: `Bearer ${user.authToken}`,
+      'X-AutoZalo-Auth-Type': user.authType,
+    };
+  }, [user?.authToken, user?.authType]);
+
   useEffect(() => {
     if (!user?.sub || !user?.email) return undefined;
 
@@ -57,11 +68,15 @@ export function AuthProvider({ children }) {
     };
   }, [user]);
 
-  const login = (profile) => setUser(profile);
+  const login = (profile, auth = {}) => setUser({
+    ...profile,
+    authType: auth?.authType || profile?.authType || '',
+    authToken: auth?.authToken || profile?.authToken || '',
+  });
   const logout = () => setUser(null);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, logout, getAuthHeaders }}>
       {children}
     </AuthContext.Provider>
   );
