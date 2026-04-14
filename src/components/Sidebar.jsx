@@ -15,7 +15,7 @@ import {
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
 } from '@mui/icons-material';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 const DRAWER_WIDTH = 280;
 
@@ -39,7 +39,7 @@ export default function Sidebar({ open, onToggle }) {
     const linkProps = item.href
       ? { component: 'a', href: item.href, target: '_blank', rel: 'noopener noreferrer' }
       : item.path
-        ? { component: 'a', href: item.path }
+        ? { component: Link, to: item.path }
         : {};
 
     return (

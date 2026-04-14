@@ -42,6 +42,7 @@ export default function App() {
     <BrowserRouter>
       <SubscriptionProvider>
         <Routes>
+          <Route path="/login" element={<LoginPage />} />
           <Route element={<Layout />}>
             <Route path="/" element={<Navigate to="/reach" replace />} />
             <Route path="/reach" element={<ReachPage />} />
@@ -49,7 +50,6 @@ export default function App() {
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/guide" element={<GuidePage />} />
-            <Route path="/login" element={<LoginPage />} />
             <Route path="/support" element={<SupportPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="*" element={<Navigate to="/reach" replace />} />
