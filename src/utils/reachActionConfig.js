@@ -15,12 +15,14 @@ export const LOCAL_VIEW_DEFAULTS = {
   dedupeRows: false,
   showHiddenMembers: false,
   showAllAccountsFriends: false,
+  showAllAccountsGroups: false,
 };
 
 export const CONTROL_DEFINITIONS = {
   removeFriend: { label: 'Xóa bạn bè', kind: 'action' },
   dedupeRows: { label: 'Lọc trùng', kind: 'local' },
   showAllAccountsFriends: { label: 'Tất cả nick', kind: 'local' },
+  showAllAccountsGroups: { label: 'Tất cả nick', kind: 'local' },
   unmuteNotifications: { label: 'Bật thông báo', kind: 'action', exclusiveWith: ['muteNotifications'] },
   muteNotifications: { label: 'Tắt thông báo', kind: 'action', exclusiveWith: ['unmuteNotifications'] },
   leaveGroup: { label: 'Rời nhóm', kind: 'action' },
@@ -40,7 +42,7 @@ export const TAB_CONTROL_ROWS = {
     ['muteNotifications'],
   ],
   1: [
-    ['leaveGroup', 'pullGroup'],
+    ['leaveGroup', 'pullGroup', 'showAllAccountsGroups'],
     ['showHiddenMembers', 'unmuteNotifications'],
     ['muteNotifications'],
   ],

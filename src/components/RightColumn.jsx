@@ -323,6 +323,45 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     return merged;
   }, [viewState.showAllAccountsFriends, accounts, friends, activeAccountId]);
 
+  // Build effective groups list: merge from all accounts if toggle is on
+  const effectiveGroupSource = useMemo(() => {
+    if (!viewState.showAllAccountsGroups || accounts.length <= 1) {
+      return groups.map((g) => ({ ...g, _sourceAccountId: activeAccountId, _sourceAccountLabel: '', _sourceAccountLabels: [] }));
+    }
+    const seen = new Map();
+    const merged = [];
+    for (let ai = 0; ai < accounts.length; ai++) {
+      const acct = accounts[ai];
+      const acctId = String(acct.id || acct.userId || `acct_${ai}`);
+      const acctLabel = acct.name || acct.phone || `Nick ${ai + 1}`;
+      const acctGroups = Array.isArray(acct.groups) ? acct.groups : [];
+      for (const g of acctGroups) {
+        const gid = g.groupId || g.threadId || g.id || '';
+        if (!gid) continue;
+        if (seen.has(gid)) {
+          const existing = seen.get(gid);
+          if (!existing._sourceAccountLabels.includes(acctLabel)) {
+            existing._sourceAccountLabels.push(acctLabel);
+          }
+          // merge members from different accounts
+          if (Array.isArray(g.members)) {
+            const existingMemberIds = new Set((existing.members || []).map((m) => m.userId || m.id));
+            for (const m of g.members) {
+              if (!existingMemberIds.has(m.userId || m.id)) {
+                existing.members = [...(existing.members || []), m];
+              }
+            }
+          }
+        } else {
+          const entry = { ...g, _sourceAccountId: acctId, _sourceAccountLabel: acctLabel, _sourceAccountLabels: [acctLabel], _sourceAccountIndex: ai };
+          seen.set(gid, entry);
+          merged.push(entry);
+        }
+      }
+    }
+    return merged;
+  }, [viewState.showAllAccountsGroups, accounts, groups, activeAccountId]);
+
   const filteredFriendRows = dedupeRows(
     effectiveFriendSource
       .map(normalizeFriendRow)
@@ -352,15 +391,20 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   );
 
   const filteredGroupRows = dedupeRows(
-    groups
+    effectiveGroupSource
       .map(normalizeGroupRow)
       .map((group, idx) => {
+        const raw = effectiveGroupSource[idx];
         const rowKey = buildRowKey(group, idx);
         const storedCollection = accountGroupCollections[rowKey];
         return {
           ...group,
           rowKey,
           classification: normalizeCollection(storedCollection || group.classification),
+          _sourceAccountId: raw?._sourceAccountId || activeAccountId,
+          _sourceAccountLabel: raw?._sourceAccountLabel || '',
+          _sourceAccountLabels: raw?._sourceAccountLabels || [],
+          _sourceAccountIndex: raw?._sourceAccountIndex ?? activeAccountIndex,
         };
       })
       .filter((group) => {
@@ -822,7 +866,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
               };
               const featureKey = featureKeyMap[controlKey];
               const featureBlocked = featureKey && !canUsePlanFeature(featureKey, planKey);
-              const isAllNickToggle = controlKey === 'showAllAccountsFriends';
+              const isAllNickToggle = controlKey === 'showAllAccountsFriends' || controlKey === 'showAllAccountsGroups';
               const allNickDisabled = isAllNickToggle && accounts.length <= 1;
 
               const handleChange = (checkedValue) => {
@@ -936,6 +980,12 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       {viewState.showAllAccountsFriends && activeTab === 0 && accounts.length > 1 && (
         <Alert severity="info" sx={{ mb: 2, py: 0.5 }} icon={false}>
           Đang hiển thị bạn bè từ <strong>{accounts.length} tài khoản</strong> ({filteredFriendRows.length} bạn bè). Nhãn nick nguồn hiển thị bên cạnh tên.
+        </Alert>
+      )}
+
+      {viewState.showAllAccountsGroups && activeTab === 1 && accounts.length > 1 && (
+        <Alert severity="info" sx={{ mb: 2, py: 0.5 }} icon={false}>
+          Đang hiển thị nhóm từ <strong>{accounts.length} tài khoản</strong> ({filteredGroupRows.length} nhóm). Nhãn nick nguồn hiển thị bên cạnh tên nhóm.
         </Alert>
       )}
 
@@ -1149,6 +1199,16 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                           {row.name}
                         </Typography>
                         {viewState.showAllAccountsFriends && activeTab === 0 && row._sourceAccountLabels?.length > 0 && (
+                          <Chip
+                            label={row._sourceAccountLabels.length > 1 ? `${row._sourceAccountLabels.length} nick` : row._sourceAccountLabels[0]}
+                            size="small"
+                            variant="outlined"
+                            color={row._sourceAccountLabels.length > 1 ? 'secondary' : 'default'}
+                            sx={{ fontSize: '0.6rem', height: 18, ml: 0.5, maxWidth: 90, '& .MuiChip-label': { px: 0.5 } }}
+                            title={row._sourceAccountLabels.join(', ')}
+                          />
+                        )}
+                        {viewState.showAllAccountsGroups && activeTab === 1 && row._sourceAccountLabels?.length > 0 && (
                           <Chip
                             label={row._sourceAccountLabels.length > 1 ? `${row._sourceAccountLabels.length} nick` : row._sourceAccountLabels[0]}
                             size="small"

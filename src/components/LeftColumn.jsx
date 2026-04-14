@@ -532,6 +532,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [delayFrom, setDelayFrom] = useState('60');
   const [delayTo, setDelayTo] = useState('60');
   const [antiSpam, setAntiSpam] = useState(true);
+  const [rotationEnabled, setRotationEnabled] = useState(false);
+  const [rotationBatchSize, setRotationBatchSize] = useState('100');
+  const [messageTemplates, setMessageTemplates] = useState([]);
+  const [rotateMessageEvery, setRotateMessageEvery] = useState('100');
   const [showExtDialog, setShowExtDialog] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
@@ -1268,23 +1272,55 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       // --- Strategy 1: Backend API (zalo-api-final, NDJSON streaming) ---
       if (API_BASE) {
         try {
+          // Use rotation endpoint when enabled and multiple accounts exist
+          const useRotation = rotationEnabled && accounts.length > 1;
+
           setFeedback({
             severity: 'info',
-            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua server...`,
+            message: useRotation
+              ? `Đang luân phiên gửi ${inviteRecords.length} lời mời qua ${accounts.length} nick...`
+              : `Đang gửi ${inviteRecords.length} lời mời kết bạn qua server...`,
           });
 
-          const res = await fetch(`${API_BASE}/api/zalo/friends/requests/batch`, {
+          const batchSizeNum = Math.max(1, parseInt(rotationBatchSize, 10) || 100);
+          const rotateEveryNum = Math.max(1, parseInt(rotateMessageEvery, 10) || 100);
+
+          const endpoint = useRotation
+            ? `${API_BASE}/api/zalo/friends/requests/batch/rotate`
+            : `${API_BASE}/api/zalo/friends/requests/batch`;
+
+          const payload = useRotation
+            ? {
+                accounts,
+                jobs: inviteRecords,
+                batchSize: batchSizeNum,
+                messageTemplates: messageTemplates.length > 0 ? messageTemplates : [],
+                rotateMessageEvery: rotateEveryNum,
+              }
+            : {
+                account: activeAccount,
+                jobs: inviteRecords,
+              };
+
+          const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              account: activeAccount,
-              jobs: inviteRecords,
-            }),
+            body: JSON.stringify(payload),
           });
 
           if (res.ok && res.body) {
             backendInviteOk = true;
             await readNdjsonStream(res, (data) => {
+              // Skip internal rotation switch events
+              if (data._rotationSwitch || data._accountError) {
+                if (data._rotationSwitch) {
+                  setFeedback({
+                    severity: 'info',
+                    message: `Chuyển từ ${data.fromAccount} → ${data.toAccount} (còn ${data.remaining} lời mời)`,
+                  });
+                }
+                return;
+              }
               const originalJob = inviteRecords.find((j) => j.id === data.jobId) || {};
               const mergedJob = { ...originalJob, ...data };
               onCampaignCommit?.({ inviteJobs: [mergedJob] });
@@ -2171,6 +2207,20 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           />
         </Box>
 
+        {accounts.length > 1 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography variant="body2" fontWeight={600}>
+              Luân phiên
+            </Typography>
+            <Switch
+              checked={rotationEnabled}
+              onChange={(event) => setRotationEnabled(event.target.checked)}
+              color="primary"
+              size="small"
+            />
+          </Box>
+        )}
+
         {running ? (
           <Button
             variant="contained"
@@ -2253,6 +2303,62 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           />
         </Box>
       </Box>
+
+      {rotationEnabled && accounts.length > 1 && (
+        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Cài đặt luân phiên
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
+                Mỗi nick gửi:
+              </Typography>
+              <TextField
+                value={rotationBatchSize}
+                onChange={(event) => setRotationBatchSize(event.target.value)}
+                size="small"
+                type="number"
+                sx={{ width: 80 }}
+                inputProps={{ min: 1 }}
+              />
+              <Typography variant="body2" color="text.secondary">
+                lời mời rồi chuyển nick
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              Sẽ luân phiên qua {accounts.length} nick: {accounts.map((a, i) => a.name || a.phone || `Nick ${i + 1}`).join(', ')}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
+                Đổi nội dung mỗi:
+              </Typography>
+              <TextField
+                value={rotateMessageEvery}
+                onChange={(event) => setRotateMessageEvery(event.target.value)}
+                size="small"
+                type="number"
+                sx={{ width: 80 }}
+                inputProps={{ min: 1 }}
+              />
+              <Typography variant="body2" color="text.secondary">
+                lời mời
+              </Typography>
+            </Box>
+            <TextField
+              label="Nội dung luân phiên (mỗi dòng 1 mẫu)"
+              multiline
+              minRows={2}
+              maxRows={5}
+              size="small"
+              value={messageTemplates.join('\n')}
+              onChange={(event) => setMessageTemplates(event.target.value.split('\n').filter((l) => l.trim()))}
+              placeholder={'Chào bạn, mình muốn kết bạn!\nXin chào, kết bạn nhé!\nHi, cho mình kết bạn với!'}
+              helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn` : 'Để trống = dùng nội dung kết bạn mặc định'}
+            />
+          </Box>
+        </Paper>
+      )}
 
       {!isPullGroupMode && (
       <Paper variant="outlined" sx={{ p: 2 }}>
