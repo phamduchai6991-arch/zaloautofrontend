@@ -85,6 +85,18 @@ function buildRewriteOptions(text) {
   ];
 }
 
+function buildRotationFallback(text) {
+  if (!text.trim()) return [];
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return [
+    compact,
+    `Chào bạn, ${compact.charAt(0).toLowerCase()}${compact.slice(1)}`,
+    `Xin chào! ${compact}`,
+    `Hi, ${compact.charAt(0).toLowerCase()}${compact.slice(1)}. Rất vui được kết nối!`,
+    `${compact}. Mong được kết bạn nhé!`,
+  ];
+}
+
 async function fetchAiRewrite(text, target) {
   const base = import.meta.env.VITE_BACKEND_URL || '';
   if (!base) return null;
@@ -844,7 +856,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setFeedback({ severity: 'warning', message: `Viết lại bằng AI yêu cầu gói ${getRequiredPlanLabel('ai_rewrite')} trở lên. Vui lòng nâng cấp để sử dụng.` });
       return;
     }
-    const sourceText = target === 'friend' ? friendRequest : message;
+    const sourceText = target === 'friend' ? friendRequest : target === 'rotation' ? (friendRequest || 'Chào bạn, mình muốn kết bạn!') : message;
     if (!sourceText.trim()) {
       setFeedback({ severity: 'warning', message: 'Cần nhập nội dung trước khi viết lại.' });
       return;
@@ -856,7 +868,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setRewriteDialog({ open: true, target, options: aiOptions, loading: false });
     } else {
       // Fallback to static options if AI unavailable
-      const fallback = buildRewriteOptions(sourceText);
+      const fallback = target === 'rotation' ? buildRotationFallback(sourceText) : buildRewriteOptions(sourceText);
       setRewriteDialog({ open: true, target, options: fallback, loading: false });
     }
   };
@@ -864,6 +876,17 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const applyRewriteOption = (value) => {
     if (rewriteDialog.target === 'friend') {
       setFriendRequest(value.slice(0, 150));
+    } else if (rewriteDialog.target === 'rotation') {
+      if (value === '__all__') {
+        // Apply all options as message templates
+        const allOptions = rewriteDialog.options.filter((o) => typeof o === 'string' && o.trim());
+        setMessageTemplates(allOptions);
+        setFeedback({ severity: 'success', message: `Đã tạo ${allOptions.length} mẫu tin nhắn luân phiên.` });
+      } else {
+        // Add single option to templates
+        setMessageTemplates((prev) => [...prev, value]);
+        setFeedback({ severity: 'success', message: 'Đã thêm 1 mẫu tin nhắn.' });
+      }
     } else {
       setMessage(value);
     }
@@ -1831,22 +1854,41 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       </Dialog>
 
       <Dialog open={rewriteDialog.open} onClose={() => setRewriteDialog({ open: false, target: 'message', options: [] })} maxWidth="sm" fullWidth>
-        <DialogTitle>✨ AI Gợi ý viết lại</DialogTitle>
+        <DialogTitle>
+          {rewriteDialog.target === 'rotation' ? '✨ AI Tạo mẫu tin nhắn luân phiên' : '✨ AI Gợi ý viết lại'}
+        </DialogTitle>
         <DialogContent>
           {rewriteDialog.loading ? (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, py: 4 }}>
               <CircularProgress size={24} />
-              <Typography variant="body2" color="text.secondary">Đang tạo gợi ý bằng AI...</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {rewriteDialog.target === 'rotation' ? 'Đang tạo mẫu tin nhắn chống spam...' : 'Đang tạo gợi ý bằng AI...'}
+              </Typography>
             </Box>
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+              {rewriteDialog.target === 'rotation' && rewriteDialog.options.length > 1 && (
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => applyRewriteOption('__all__')}
+                  sx={{ mb: 1, textTransform: 'none', fontWeight: 700 }}
+                >
+                  Dùng tất cả {rewriteDialog.options.length} mẫu
+                </Button>
+              )}
               {rewriteDialog.options.map((option, idx) => (
                 <Button
                   key={idx}
                   variant="outlined"
                   onClick={() => applyRewriteOption(option)}
-                  sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                  sx={{ justifyContent: 'flex-start', textAlign: 'left', textTransform: 'none' }}
                 >
+                  {rewriteDialog.target === 'rotation' && (
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1, fontWeight: 700 }}>
+                      #{idx + 1}
+                    </Typography>
+                  )}
                   {option}
                 </Button>
               ))}
@@ -2319,6 +2361,22 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn` : 'Để trống = dùng lời mời mặc định'}
               sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
             />
+            <Button
+              size="small"
+              startIcon={<AiIcon fontSize="small" />}
+              onClick={() => openRewriteDialog('rotation')}
+              disabled={!canUsePlanFeature('ai_rewrite', planKey)}
+              sx={{
+                textTransform: 'none',
+                fontSize: '0.75rem',
+                borderRadius: '16px',
+                px: 1.5,
+                mt: 0.5,
+                alignSelf: 'flex-start',
+              }}
+            >
+              AI tạo mẫu chống spam
+            </Button>
           </Box>
         )}
 
