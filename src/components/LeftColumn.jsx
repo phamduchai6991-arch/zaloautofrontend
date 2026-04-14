@@ -1576,7 +1576,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   };
 
   return (
-    <Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Box sx={{ flex: 1, overflow: 'auto', pb: 1 }}>
       <Box sx={{ mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <Typography variant="body2" color="text.secondary">
@@ -2170,196 +2171,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         </Box>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 3 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, alignItems: 'center' }}>
-          <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
-            Cách nhau:
-          </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <TextField
-              label="Từ (giây)"
-              value={delayFrom}
-              onChange={(event) => setDelayFrom(event.target.value)}
-              size="small"
-              type="text"
-              sx={{ width: 100 }}
-            />
-            <TextField
-              label="Đến (giây)"
-              value={delayTo}
-              onChange={(event) => setDelayTo(event.target.value)}
-              size="small"
-              type="text"
-              sx={{ width: 100 }}
-            />
-          </Box>
-        </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Typography variant="body2" fontWeight={600}>
-            Spam
-          </Typography>
-          <Switch
-            checked={antiSpam}
-            onChange={(event) => setAntiSpam(event.target.checked)}
-            color="error"
-            size="small"
-          />
-        </Box>
-
-        {accounts.length > 1 && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography variant="body2" fontWeight={600}>
-              Luân phiên
-            </Typography>
-            <Switch
-              checked={rotationEnabled}
-              onChange={(event) => setRotationEnabled(event.target.checked)}
-              color="primary"
-              size="small"
-            />
-          </Box>
-        )}
-
-        {running ? (
-          <Button
-            variant="contained"
-            size="large"
-            type="button"
-            endIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
-            onClick={handlePauseToggle}
-            sx={{
-              width: 200,
-              height: 48,
-              fontWeight: 700,
-              fontSize: '0.9rem',
-              borderRadius: '8px',
-              bgcolor: paused ? '#f59e0b' : '#ff5630',
-              boxShadow: 'none',
-              textTransform: 'none',
-              '&:hover': { bgcolor: paused ? '#d97706' : '#cc4526' },
-            }}
-          >
-            {paused ? 'Tiếp tục' : 'Tạm dừng'}
-          </Button>
-        ) : (
-          <Button
-            variant="contained"
-            size="large"
-            type="button"
-            endIcon={<SendIcon />}
-            onClick={handleStart}
-            sx={{
-              width: 200,
-              height: 48,
-              fontWeight: 700,
-              fontSize: '0.9rem',
-              borderRadius: '8px',
-              bgcolor: 'rgb(32,101,209)',
-              boxShadow: 'none',
-              textTransform: 'none',
-              '&:hover': { bgcolor: 'rgb(24, 80, 170)' },
-            }}
-          >
-            Bắt Đầu
-          </Button>
-        )}
-
-        <Box sx={{ position: 'relative' }}>
-          <Button
-            variant="contained"
-            onClick={() => setScheduleDialogOpen(true)}
-            disabled={!hasAccount || !selectedCount || (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected)}
-            sx={{
-              minWidth: 64,
-              height: 48,
-              borderRadius: '8px',
-              bgcolor: 'rgba(145,158,171,0.24)',
-              color: 'rgba(145,158,171,0.8)',
-              boxShadow: 'none',
-              '&:hover': { bgcolor: 'rgba(145,158,171,0.34)' },
-              '&.Mui-disabled': {
-                bgcolor: 'rgba(145,158,171,0.24)',
-                color: 'rgba(145,158,171,0.8)',
-              },
-            }}
-          >
-            <CalendarIcon />
-          </Button>
-          <Chip
-            label={scheduleAt ? 'Đã đặt' : 'Soon'}
-            size="small"
-            sx={{
-              position: 'absolute',
-              top: -8,
-              right: -8,
-              fontSize: '0.6rem',
-              height: 18,
-              fontWeight: 700,
-              bgcolor: scheduleAt ? '#00a76f' : '#ef5350',
-              color: '#fff',
-              '& .MuiChip-label': { px: 0.5 },
-            }}
-          />
-        </Box>
-      </Box>
-
-      {rotationEnabled && accounts.length > 1 && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Cài đặt luân phiên
-          </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
-                Mỗi nick gửi:
-              </Typography>
-              <TextField
-                value={rotationBatchSize}
-                onChange={(event) => setRotationBatchSize(event.target.value)}
-                size="small"
-                type="number"
-                sx={{ width: 80 }}
-                inputProps={{ min: 1 }}
-              />
-              <Typography variant="body2" color="text.secondary">
-                lời mời rồi chuyển nick
-              </Typography>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              Sẽ luân phiên qua {accounts.length} nick: {accounts.map((a, i) => a.name || a.phone || `Nick ${i + 1}`).join(', ')}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
-                Đổi nội dung mỗi:
-              </Typography>
-              <TextField
-                value={rotateMessageEvery}
-                onChange={(event) => setRotateMessageEvery(event.target.value)}
-                size="small"
-                type="number"
-                sx={{ width: 80 }}
-                inputProps={{ min: 1 }}
-              />
-              <Typography variant="body2" color="text.secondary">
-                lời mời
-              </Typography>
-            </Box>
-            <TextField
-              label="Nội dung luân phiên (mỗi dòng 1 mẫu)"
-              multiline
-              minRows={2}
-              maxRows={5}
-              size="small"
-              value={messageTemplates.join('\n')}
-              onChange={(event) => setMessageTemplates(event.target.value.split('\n').filter((l) => l.trim()))}
-              placeholder={'Chào bạn, mình muốn kết bạn!\nXin chào, kết bạn nhé!\nHi, cho mình kết bạn với!'}
-              helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn` : 'Để trống = dùng nội dung kết bạn mặc định'}
-            />
-          </Box>
-        </Paper>
-      )}
-
       {!isPullGroupMode && (
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -2394,6 +2205,208 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         )}
       </Paper>
       )}
+      </Box>
+
+      {/* ── Sticky bottom action bar ── */}
+      <Paper
+        elevation={3}
+        sx={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 10,
+          borderRadius: '12px 12px 0 0',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          px: 2,
+          py: 1.5,
+        }}
+      >
+        {/* Row 1: Settings toggles */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography variant="caption" fontWeight={600} color="text.secondary">
+              Delay:
+            </Typography>
+            <TextField
+              value={delayFrom}
+              onChange={(event) => setDelayFrom(event.target.value)}
+              size="small"
+              type="text"
+              sx={{ width: 52, '& .MuiInputBase-input': { py: 0.5, px: 0.75, fontSize: '0.75rem' } }}
+            />
+            <Typography variant="caption" color="text.secondary">–</Typography>
+            <TextField
+              value={delayTo}
+              onChange={(event) => setDelayTo(event.target.value)}
+              size="small"
+              type="text"
+              sx={{ width: 52, '& .MuiInputBase-input': { py: 0.5, px: 0.75, fontSize: '0.75rem' } }}
+            />
+            <Typography variant="caption" color="text.secondary">giây</Typography>
+          </Box>
+
+          <Tooltip title="Bật chống spam: thêm delay ngẫu nhiên giữa mỗi lời mời để tránh bị Zalo phát hiện" arrow>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, cursor: 'pointer' }}>
+              <Typography variant="caption" fontWeight={600} color={antiSpam ? 'error.main' : 'text.secondary'}>
+                Chống spam
+              </Typography>
+              <Switch
+                checked={antiSpam}
+                onChange={(event) => setAntiSpam(event.target.checked)}
+                color="error"
+                size="small"
+              />
+            </Box>
+          </Tooltip>
+
+          {accounts.length > 1 && (
+            <Tooltip title={`Luân phiên gửi kết bạn qua ${accounts.length} nick để tránh bị khóa. Mỗi nick gửi ${rotationBatchSize} lời mời rồi chuyển sang nick kế tiếp.`} arrow>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, cursor: 'pointer' }}>
+                <Typography variant="caption" fontWeight={600} color={rotationEnabled ? 'primary.main' : 'text.secondary'}>
+                  Luân phiên
+                </Typography>
+                <Switch
+                  checked={rotationEnabled}
+                  onChange={(event) => setRotationEnabled(event.target.checked)}
+                  color="primary"
+                  size="small"
+                />
+              </Box>
+            </Tooltip>
+          )}
+        </Box>
+
+        {/* Row 1.5: Rotation expanded settings */}
+        {rotationEnabled && accounts.length > 1 && (
+          <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+              <Typography variant="caption" fontWeight={600}>Mỗi nick gửi:</Typography>
+              <TextField
+                value={rotationBatchSize}
+                onChange={(event) => setRotationBatchSize(event.target.value)}
+                size="small"
+                type="number"
+                sx={{ width: 64, '& .MuiInputBase-input': { py: 0.5, px: 0.75, fontSize: '0.75rem' } }}
+                inputProps={{ min: 1 }}
+              />
+              <Typography variant="caption" color="text.secondary">lời mời rồi chuyển nick</Typography>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              {accounts.length} nick: {accounts.map((a, i) => a.name || a.phone || `Nick ${i + 1}`).join(', ')}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+              <Typography variant="caption" fontWeight={600}>Đổi nội dung mỗi:</Typography>
+              <TextField
+                value={rotateMessageEvery}
+                onChange={(event) => setRotateMessageEvery(event.target.value)}
+                size="small"
+                type="number"
+                sx={{ width: 64, '& .MuiInputBase-input': { py: 0.5, px: 0.75, fontSize: '0.75rem' } }}
+                inputProps={{ min: 1 }}
+              />
+              <Typography variant="caption" color="text.secondary">lời mời</Typography>
+            </Box>
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              maxRows={4}
+              size="small"
+              value={messageTemplates.join('\n')}
+              onChange={(event) => setMessageTemplates(event.target.value.split('\n').filter((l) => l.trim()))}
+              placeholder={'Chào bạn, kết bạn nhé!\nXin chào, mình muốn kết bạn!\nHi, cho mình kết bạn với!'}
+              helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn` : 'Để trống = dùng lời mời mặc định'}
+              sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
+            />
+          </Box>
+        )}
+
+        {/* Row 2: Action buttons */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {running ? (
+            <Button
+              variant="contained"
+              size="medium"
+              type="button"
+              endIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
+              onClick={handlePauseToggle}
+              sx={{
+                flex: 1,
+                height: 44,
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                borderRadius: '8px',
+                bgcolor: paused ? '#f59e0b' : '#ff5630',
+                boxShadow: 'none',
+                textTransform: 'none',
+                '&:hover': { bgcolor: paused ? '#d97706' : '#cc4526' },
+              }}
+            >
+              {paused ? 'Tiếp tục' : 'Tạm dừng'}
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              size="medium"
+              type="button"
+              endIcon={<SendIcon />}
+              onClick={handleStart}
+              sx={{
+                flex: 1,
+                height: 44,
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                borderRadius: '8px',
+                bgcolor: 'rgb(32,101,209)',
+                boxShadow: 'none',
+                textTransform: 'none',
+                '&:hover': { bgcolor: 'rgb(24, 80, 170)' },
+              }}
+            >
+              Bắt Đầu
+            </Button>
+          )}
+
+          <Box sx={{ position: 'relative' }}>
+            <Button
+              variant="contained"
+              onClick={() => setScheduleDialogOpen(true)}
+              disabled={!hasAccount || !selectedCount || (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected)}
+              sx={{
+                minWidth: 48,
+                height: 44,
+                borderRadius: '8px',
+                bgcolor: 'rgba(145,158,171,0.24)',
+                color: 'rgba(145,158,171,0.8)',
+                boxShadow: 'none',
+                '&:hover': { bgcolor: 'rgba(145,158,171,0.34)' },
+                '&.Mui-disabled': {
+                  bgcolor: 'rgba(145,158,171,0.24)',
+                  color: 'rgba(145,158,171,0.8)',
+                },
+              }}
+            >
+              <CalendarIcon />
+            </Button>
+            <Chip
+              label={scheduleAt ? 'Đã đặt' : 'Soon'}
+              size="small"
+              sx={{
+                position: 'absolute',
+                top: -8,
+                right: -8,
+                fontSize: '0.6rem',
+                height: 18,
+                fontWeight: 700,
+                bgcolor: scheduleAt ? '#00a76f' : '#ef5350',
+                color: '#fff',
+                '& .MuiChip-label': { px: 0.5 },
+              }}
+            />
+          </Box>
+        </Box>
+      </Paper>
     </Box>
   );
 }

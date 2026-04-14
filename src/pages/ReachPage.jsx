@@ -103,7 +103,7 @@ export default function ReachPage() {
     <Box sx={{ p: 2.5 }}>
       <Box sx={{ display: 'flex', gap: 2, flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
         {/* Left column */}
-        <Box sx={{ flex: '1 1 50%', minWidth: 0 }}>
+        <Box sx={{ flex: '1 1 50%', minWidth: 0, height: 'calc(100vh - 100px)' }}>
           <LeftColumn
             selection={selection}
             actionState={actionState}
