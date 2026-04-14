@@ -65,6 +65,7 @@ function isExtensionInvalidationError(value) {
 function normalizeAccountRecord(account, index = 0) {
   return {
     id: account.id || account.zaloId || account.userId || account.cookie || `legacy_${index}`,
+    ownerUserId: account.ownerUserId || '',
     cookie: account.cookie || '',
     cookies: Array.isArray(account.cookies) ? account.cookies : [],
     cookieCount: account.cookieCount || 0,
@@ -244,7 +245,7 @@ export function AccountProvider({ children }) {
       const remoteAccounts = await serverGetAccounts(googleUserId, authHeaders);
       if (cancelled) return;
       if (!Array.isArray(remoteAccounts)) return;
-      const normalized = remoteAccounts.map((account, index) => normalizeAccountRecord(account, index));
+      const normalized = remoteAccounts.map((account, index) => normalizeAccountRecord({ ...account, ownerUserId: account.ownerUserId || googleUserId }, index));
       const cachedById = new Map(cachedAccounts.map((account) => [account.id, account]));
       const merged = normalized.map((account) => {
         const cached = cachedById.get(account.id);
@@ -435,6 +436,7 @@ export function AccountProvider({ children }) {
         const accountId = me.userId || session.userId || data.userId || `acct_${Date.now()}`;
         const incomingAccount = {
           id: accountId,
+          ownerUserId: googleUserId,
           cookie: '',
           cookies: Array.isArray(data.cookies) ? data.cookies : [],
           cookieCount: data.cookieCount || 0,
