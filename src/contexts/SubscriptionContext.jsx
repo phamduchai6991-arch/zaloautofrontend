@@ -130,9 +130,11 @@ export function SubscriptionProvider({ children }) {
         writeCachedSubscription(user.sub, nextSubscription);
         return nextSubscription;
       } else {
-        setSubscription(null);
-        writeCachedSubscription(user.sub, null);
-        return null;
+        // Server error (e.g. cold start, 500) — keep existing subscription, don't reset to free
+        console.warn('[Subscription] Server trả lỗi', res.status, '— giữ nguyên gói hiện tại.');
+        const fallbackSubscription = getCachedSubscription(user.sub);
+        setSubscription((prev) => prev || fallbackSubscription);
+        return fallbackSubscription;
       }
     } catch {
       const fallbackSubscription = getCachedSubscription(user.sub);
