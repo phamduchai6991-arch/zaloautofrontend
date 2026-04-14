@@ -13,6 +13,7 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
+  Alert,
 } from '@mui/material';
 import {
   Download as DownloadIcon,
@@ -27,7 +28,7 @@ import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 
 export default function HeaderBar() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, authExpired } = useAuth();
   const { extensionActive, extensionChecked } = useAccount();
   const { planKey, isActive, loading } = useSubscription();
   const [anchorEl, setAnchorEl] = useState(null);
@@ -72,6 +73,19 @@ export default function HeaderBar() {
         boxShadow: 'none',
       }}
     >
+      {authExpired && (
+        <Alert
+          severity="warning"
+          action={
+            <Button color="inherit" size="small" onClick={() => { logout(); openLoginPage(); }}>
+              Đăng nhập lại
+            </Button>
+          }
+          sx={{ borderRadius: 0 }}
+        >
+          Phiên đăng nhập Google đã hết hạn. Vui lòng đăng nhập lại để tiếp tục sử dụng.
+        </Alert>
+      )}
       <Toolbar sx={{ justifyContent: 'flex-end', gap: 1.5, minHeight: '92px !important', px: 3 }}>
         {/* Extension Status */}
         {extensionChecked && extensionActive ? (

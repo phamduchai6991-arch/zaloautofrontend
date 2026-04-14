@@ -54,6 +54,7 @@ export default function LoginPage() {
           {
             authType: 'google-access-token',
             authToken: tokenResponse.access_token,
+            expiresIn: tokenResponse.expires_in || 3600,
           },
         );
         window.location.replace('/reach');

@@ -167,13 +167,18 @@ async function serverRemoveAccount(userId, zaloId, authHeaders = {}) {
   }
 }
 
-async function serverGetAccounts(userId, authHeaders = {}) {
+async function serverGetAccounts(userId, authHeaders = {}, onAuthError) {
   if (!API_BASE || !userId) return [];
   try {
     const res = await fetch(`${API_BASE}/api/accounts?userId=${encodeURIComponent(userId)}`, {
       cache: 'no-store',
       headers: { ...authHeaders },
     });
+    if (res.status === 401 || res.status === 403) {
+      console.warn('[Account] Server trả về', res.status, '— token Google có thể đã hết hạn.');
+      if (typeof onAuthError === 'function') onAuthError();
+      return null;
+    }
     const data = await res.json();
     return data.ok ? data.accounts : [];
   } catch {
@@ -189,7 +194,7 @@ async function persistAccountToServer(userId, account, authHeaders = {}) {
 const AccountContext = createContext(null);
 
 export function AccountProvider({ children }) {
-  const { user, getAuthHeaders } = useAuth();
+  const { user, getAuthHeaders, handleAuthError } = useAuth();
   const googleUserId = user?.sub || '';
   const extensionInvalidatedRef = useRef(false);
   const [extensionActive, setExtensionActive] = useState(false);
@@ -213,11 +218,11 @@ export function AccountProvider({ children }) {
       return 0;
     }
 
-    const list = await serverGetAccounts(googleUserId, getAuthHeaders());
+    const list = await serverGetAccounts(googleUserId, getAuthHeaders(), handleAuthError);
     const count = Array.isArray(list) ? list.length : 0;
     setServerAccountCount(count);
     return count;
-  }, [getAuthHeaders, googleUserId]);
+  }, [getAuthHeaders, googleUserId, handleAuthError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -242,7 +247,7 @@ export function AccountProvider({ children }) {
 
     (async () => {
       const authHeaders = getAuthHeaders();
-      const remoteAccounts = await serverGetAccounts(googleUserId, authHeaders);
+      const remoteAccounts = await serverGetAccounts(googleUserId, authHeaders, handleAuthError);
       if (cancelled) return;
       if (!Array.isArray(remoteAccounts)) return;
       const normalized = remoteAccounts.map((account, index) => normalizeAccountRecord({ ...account, ownerUserId: account.ownerUserId || googleUserId }, index));
@@ -285,7 +290,7 @@ export function AccountProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [getAuthHeaders, googleUserId]);
+  }, [getAuthHeaders, googleUserId, handleAuthError]);
 
   const activeAccount = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
   const syncing = isBusySyncPhase(syncState.phase);
