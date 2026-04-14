@@ -593,6 +593,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     serverAccountCount,
     refreshServerAccountCount,
     removeAccount,
+    zaloSessionStatus,
+    recheckZaloSession,
   } = useAccount();
 
   const { maxAccounts, isActive, isExpired, planKey, refetch: refetchSubscription } = useSubscription();
@@ -634,7 +636,13 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     : extensionStatus?.reason || 'Chưa kết nối, hãy kiểm tra extension.';
   const extensionStatusHints = Array.isArray(extensionStatus?.hints) ? extensionStatus.hints : [];
   const syncStatusLabel = activeAccountReady
-    ? 'Sẵn sàng'
+    ? (zaloSessionStatus === 'checking'
+      ? 'Đang kiểm tra phiên...'
+      : zaloSessionStatus === 'expired'
+        ? 'Phiên Zalo hết hạn'
+        : zaloSessionStatus === 'valid'
+          ? 'Sẵn sàng'
+          : 'Sẵn sàng')
     : syncState.phase === 'awaiting_sync_confirmation'
       ? 'Chờ xác nhận đồng bộ'
       : syncState.phase === 'waiting_for_login'
@@ -643,7 +651,11 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           ? 'Đang đồng bộ'
           : 'Chưa sẵn sàng';
   const syncStatusColor = activeAccountReady
-    ? 'success'
+    ? (zaloSessionStatus === 'expired'
+      ? 'error'
+      : zaloSessionStatus === 'checking'
+        ? 'info'
+        : 'success')
     : syncState.phase === 'awaiting_sync_confirmation'
       ? 'warning'
       : syncState.phase === 'waiting_for_login' || syncState.phase === 'syncing_account'
@@ -1630,6 +1642,20 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           </Typography>
         </Paper>
       </Box>
+
+      {zaloSessionStatus === 'expired' && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => { recheckZaloSession(); refreshAccount(); }}>
+              Đồng bộ lại
+            </Button>
+          }
+        >
+          Phiên đăng nhập Zalo đã hết hạn. Hãy đồng bộ lại tài khoản để tiếp tục gửi tin nhắn.
+        </Alert>
+      )}
 
       {feedback && (
         <Alert severity={feedback.severity} sx={{ mb: 2 }} onClose={() => setFeedback(null)}>

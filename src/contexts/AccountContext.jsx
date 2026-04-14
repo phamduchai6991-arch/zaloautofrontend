@@ -297,6 +297,56 @@ export function AccountProvider({ children }) {
   const waitingForLogin = isVisibleSyncPhase(syncState.phase);
   const activeAccountReady = Boolean(activeAccount && activeAccount.syncStatus === 'ready');
 
+  // ─── Zalo session validity check (ping) ────────────────
+  // States: 'unknown' | 'checking' | 'valid' | 'expired'
+  const [zaloSessionStatus, setZaloSessionStatus] = useState('unknown');
+  const lastPingAccountIdRef = useRef(null);
+  const [pingTrigger, setPingTrigger] = useState(0);
+
+  useEffect(() => {
+    if (!API_BASE || !activeAccount || !activeAccountReady) {
+      setZaloSessionStatus('unknown');
+      lastPingAccountIdRef.current = null;
+      return;
+    }
+
+    const accountId = activeAccount.id || activeAccount.userId || activeAccount.zaloId;
+    // Don't re-ping the same account (unless manual re-check triggered)
+    if (lastPingAccountIdRef.current === accountId && pingTrigger === 0) return;
+
+    let cancelled = false;
+    setZaloSessionStatus('checking');
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/zalo/account/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: activeAccount }),
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setZaloSessionStatus('unknown');
+          return;
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        lastPingAccountIdRef.current = accountId;
+        setZaloSessionStatus(data.valid ? 'valid' : 'expired');
+      } catch {
+        if (!cancelled) setZaloSessionStatus('unknown');
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [activeAccount?.id, activeAccountReady, pingTrigger]);
+
+  // Allow manual re-check (e.g. after re-sync)
+  const recheckZaloSession = useCallback(() => {
+    lastPingAccountIdRef.current = null;
+    setPingTrigger((n) => n + 1);
+  }, []);
+
   const updateAccountById = useCallback((accountId, patch) => {
     if (!accountId || !patch) return;
     setAccounts((prev) => prev.map((account) => (
@@ -823,6 +873,8 @@ export function AccountProvider({ children }) {
     setActiveAccountIndex,
     setFriends,
     setGroups,
+    zaloSessionStatus,
+    recheckZaloSession,
   };
 
   return (
