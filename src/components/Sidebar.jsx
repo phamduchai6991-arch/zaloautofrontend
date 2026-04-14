@@ -15,7 +15,7 @@ import {
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
 } from '@mui/icons-material';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 
 const DRAWER_WIDTH = 280;
 
@@ -32,7 +32,6 @@ const bottomMenu = [
 export default function Sidebar({ open, onToggle }) {
   const drawerWidth = open ? DRAWER_WIDTH : 80;
   const location = useLocation();
-  const navigate = useNavigate();
 
   const renderItem = (item, idx) => {
     const isActive = item.path ? location.pathname.startsWith(item.path) : false;
@@ -40,7 +39,7 @@ export default function Sidebar({ open, onToggle }) {
     const linkProps = item.href
       ? { component: 'a', href: item.href, target: '_blank', rel: 'noopener noreferrer' }
       : item.path
-        ? { onClick: () => navigate(item.path) }
+        ? { onClick: () => window.location.assign(item.path) }
         : {};
 
     return (
