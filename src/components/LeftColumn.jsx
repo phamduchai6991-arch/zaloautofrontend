@@ -906,22 +906,20 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       if (friendOptions && friendOptions.length > 0) {
         setFriendRequest(friendOptions[0].slice(0, 150));
       }
-      // If rotation enabled, also generate rotation templates
-      if (rotationEnabled && accounts.length > 1) {
-        const rotationOptions = await fetchAiRewrite(seedText, 'rotation');
-        if (rotationOptions && rotationOptions.length > 0) {
-          setMessageTemplates(rotationOptions);
-        } else {
-          setMessageTemplates(buildRotationFallback(seedText));
-        }
+      // Always generate rotation templates for varied content (chống spam)
+      const rotationOptions = await fetchAiRewrite(seedText, 'rotation');
+      if (rotationOptions && rotationOptions.length > 0) {
+        setMessageTemplates(rotationOptions);
+      } else {
+        setMessageTemplates(buildRotationFallback(seedText));
       }
-      setFeedback({ severity: 'success', message: 'AI đã tự động tạo nội dung kết bạn.' });
+      setFeedback({ severity: 'success', message: 'AI đã tự động tạo nội dung kết bạn và mẫu luân phiên.' });
     } catch (_) {
       setFeedback({ severity: 'error', message: 'Không thể tạo nội dung bằng AI.' });
     } finally {
       setAiGenerating(false);
     }
-  }, [friendRequest, rotationEnabled, accounts.length, planKey]);
+  }, [friendRequest, planKey]);
 
   // Auto-trigger when toggle is turned on
   useEffect(() => {
@@ -1361,6 +1359,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             : {
                 account: activeAccount,
                 jobs: inviteRecords,
+                messageTemplates: messageTemplates.length > 0 ? messageTemplates : [],
+                rotateMessageEvery: rotateEveryNum,
               };
 
           const res = await fetch(endpoint, {
@@ -2389,9 +2389,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           )}
         </Box>
 
-        {/* Row 1.5: Rotation expanded settings */}
+        {/* Row 1.5a: Rotation nick settings (only when rotation enabled + multi-account) */}
         {rotationEnabled && accounts.length > 1 && (
-          <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1.5 }}>
+          <Box sx={{ mb: 0.5, p: 1, bgcolor: 'action.hover', borderRadius: 1.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
               <Typography variant="caption" fontWeight={600}>Mỗi nick gửi:</Typography>
               <TextField
@@ -2404,9 +2404,15 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               />
               <Typography variant="caption" color="text.secondary">lời mời rồi chuyển nick</Typography>
             </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
               {accounts.length} nick: {accounts.map((a, i) => a.name || a.phone || `Nick ${i + 1}`).join(', ')}
             </Typography>
+          </Box>
+        )}
+
+        {/* Row 1.5b: Message templates (when rotation or AI auto enabled) */}
+        {(rotationEnabled || autoAiContent || messageTemplates.length > 0) && (
+          <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
               <Typography variant="caption" fontWeight={600}>Đổi nội dung mỗi:</Typography>
               <TextField
@@ -2428,7 +2434,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               value={messageTemplates.join('\n')}
               onChange={(event) => setMessageTemplates(event.target.value.split('\n').filter((l) => l.trim()))}
               placeholder={'Chào bạn, kết bạn nhé!\nXin chào, mình muốn kết bạn!\nHi, cho mình kết bạn với!'}
-              helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn` : 'Để trống = dùng lời mời mặc định'}
+              helperText={messageTemplates.length > 0 ? `${messageTemplates.length} mẫu tin nhắn — đổi nội dung mỗi ${rotateMessageEvery} lời mời` : 'Để trống = dùng lời mời mặc định (không đổi)'}
               sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem' } }}
             />
             <Button
