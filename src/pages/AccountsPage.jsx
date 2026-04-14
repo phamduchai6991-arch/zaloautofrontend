@@ -11,8 +11,10 @@ import {
 } from '@mui/material';
 import { useAccount } from '../contexts/AccountContext';
 import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function AccountsPage() {
+  const navigate = useNavigate();
   const {
     accounts,
     activeAccountIndex,
@@ -60,7 +62,7 @@ export default function AccountsPage() {
         <Alert
           severity="info"
           sx={{ mb: 2 }}
-          action={<Button color="info" size="small" onClick={() => window.location.assign('/pricing')}>Nâng cấp</Button>}
+          action={<Button color="info" size="small" onClick={() => navigate('/pricing')}>Nâng cấp</Button>}
         >
           Bạn đang dùng gói miễn phí (tối đa 1 tài khoản). Nâng cấp để thêm nhiều tài khoản hơn.
         </Alert>
@@ -72,7 +74,7 @@ export default function AccountsPage() {
         <Alert
           severity="error"
           sx={{ mb: 2 }}
-          action={<Button color="error" size="small" onClick={() => window.location.assign('/pricing')}>Gia hạn</Button>}
+          action={<Button color="error" size="small" onClick={() => navigate('/pricing')}>Gia hạn</Button>}
         >
           Gói <strong>{PLAN_LABELS[subscription?.planKey] || subscription?.planKey || planKey}</strong> đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.
         </Alert>
@@ -84,7 +86,7 @@ export default function AccountsPage() {
         <Alert
           severity="warning"
           sx={{ mb: 2 }}
-          action={<Button color="warning" size="small" onClick={() => window.location.assign('/pricing')}>Gia hạn</Button>}
+          action={<Button color="warning" size="small" onClick={() => navigate('/pricing')}>Gia hạn</Button>}
         >
           Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> còn <strong>{daysLeft} ngày</strong> nữa hết hạn.
         </Alert>

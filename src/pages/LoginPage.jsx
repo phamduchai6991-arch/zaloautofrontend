@@ -3,9 +3,11 @@ import { Box, Typography, Paper, Button, Alert, Stack, Avatar } from '@mui/mater
 import { GoogleLogin, useGoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from 'jwt-decode';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function LoginPage() {
   const { user, login, logout } = useAuth();
+  const navigate = useNavigate();
   const [showFallback, setShowFallback] = React.useState(false);
   const [loginError, setLoginError] = React.useState('');
 
@@ -30,7 +32,7 @@ export default function LoginPage() {
           authToken: credentialResponse.credential,
         },
       );
-      window.location.replace('/reach');
+      navigate('/reach', { replace: true });
     } catch (e) {
       setLoginError('Lỗi xử lý token đăng nhập. Hãy thử lại.');
     }
@@ -57,7 +59,7 @@ export default function LoginPage() {
             expiresIn: tokenResponse.expires_in || 3600,
           },
         );
-        window.location.replace('/reach');
+        navigate('/reach', { replace: true });
       } catch (e) {
         setLoginError('Không lấy được thông tin tài khoản Google. Hãy thử lại.');
       }
@@ -112,7 +114,7 @@ export default function LoginPage() {
               <Button
                 fullWidth
                 variant="contained"
-                onClick={() => window.location.replace('/reach')}
+                onClick={() => navigate('/reach', { replace: true })}
                 sx={{ textTransform: 'none', borderRadius: 2 }}
               >
                 Vào ứng dụng
