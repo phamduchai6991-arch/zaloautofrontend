@@ -20,12 +20,15 @@ import {
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 
 export default function HeaderBar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { extensionActive, extensionChecked } = useAccount();
   const { planKey, isActive, loading } = useSubscription();
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -70,28 +73,51 @@ export default function HeaderBar() {
       }}
     >
       <Toolbar sx={{ justifyContent: 'flex-end', gap: 1.5, minHeight: '92px !important', px: 3 }}>
-        {/* Download Extension */}
-        <Button
-          size="small"
-          component="a"
-          href="/autozalo-extension.zip"
-          download="autozalo-extension.zip"
-          startIcon={<DownloadIcon fontSize="small" />}
-          sx={{
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            border: '0.8px solid',
-            borderColor: 'rgb(255,72,66)',
-            color: 'rgb(255,72,66)',
-            textTransform: 'none',
-            borderRadius: '8px',
-            px: 2,
-            py: 0.5,
-            height: 32,
-          }}
-        >
-          Tải và cài extension để web hoạt động trước · v2.0.0
-        </Button>
+        {/* Extension Status */}
+        {extensionChecked && extensionActive ? (
+          <Button
+            size="small"
+            startIcon={<CheckCircleIcon fontSize="small" />}
+            sx={{
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              border: '0.8px solid',
+              borderColor: 'rgb(84,214,44)',
+              color: 'rgb(34,154,22)',
+              bgcolor: 'rgba(84,214,44,0.08)',
+              textTransform: 'none',
+              borderRadius: '8px',
+              px: 2,
+              py: 0.5,
+              height: 32,
+              pointerEvents: 'none',
+            }}
+          >
+            Extension đã kết nối · v2.0.0
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            component="a"
+            href="/autozalo-extension.zip"
+            download="autozalo-extension.zip"
+            startIcon={<DownloadIcon fontSize="small" />}
+            sx={{
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              border: '0.8px solid',
+              borderColor: 'rgb(255,72,66)',
+              color: 'rgb(255,72,66)',
+              textTransform: 'none',
+              borderRadius: '8px',
+              px: 2,
+              py: 0.5,
+              height: 32,
+            }}
+          >
+            Tải và cài extension để web hoạt động trước · v2.0.0
+          </Button>
+        )}
 
         {/* Flag */}
         <IconButton
