@@ -62,6 +62,7 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
   const [step, setStep] = useState('creating'); // creating | transfer | checking | success | error
   const [order, setOrder] = useState(null);
   const [bankInfo, setBankInfo] = useState(null);
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
   const [error, setError] = useState('');
   const pollRef = useRef(null);
   const pollStartedAtRef = useRef(0);
@@ -78,6 +79,7 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
     setStep('creating');
     setError('');
     setOrder(null);
+    setUpgradeInfo(null);
 
     fetch(`${API_BASE}/api/payment/create-order`, {
       method: 'POST',
@@ -94,6 +96,7 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
         if (data.ok) {
           setOrder(data.order);
           setBankInfo(data.bank);
+          setUpgradeInfo(data.upgrade || null);
           setStep('transfer');
         } else {
           setError(data.error || 'Không tạo được đơn hàng.');
@@ -258,6 +261,16 @@ export default function PaymentDialog({ open, onClose, plan, period, user }) {
                   {PERIOD_LABELS[order.period]} — <strong>{formatPrice(order.amount)}</strong>
                 </Typography>
               </Stack>
+              {upgradeInfo && (
+                <Alert severity="info" icon={false} sx={{ mt: 1.5, py: 0.5 }}>
+                  <Typography variant="body2">
+                    Giá gốc: {formatPrice(upgradeInfo.originalAmount)} — Trừ còn lại gói cũ: <strong>−{formatPrice(upgradeInfo.discount)}</strong>
+                  </Typography>
+                  <Typography variant="body2" fontWeight={700}>
+                    Chỉ cần thanh toán: {formatPrice(upgradeInfo.finalAmount)}
+                  </Typography>
+                </Alert>
+              )}
             </Box>
 
             {/* SePay Dynamic QR Code */}

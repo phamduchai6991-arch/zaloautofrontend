@@ -15,7 +15,7 @@ import {
   AccountBalance as BankIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import { useSubscription } from '../contexts/SubscriptionContext';
+import { useSubscription, PLAN_LABELS } from '../contexts/SubscriptionContext';
 import { useNavigate } from 'react-router-dom';
 import PaymentDialog from '../components/PaymentDialog';
 
@@ -84,9 +84,17 @@ function formatPrice(value) {
   return value.toLocaleString('vi-VN') + 'đ';
 }
 
-function PlanCard({ plan, yearly, onBuy }) {
+const PLAN_RANK = { free: 0, basic: 1, plus: 2, pro: 3 };
+
+function PlanCard({ plan, yearly, onBuy, currentPlanKey, isCurrentActive }) {
   const price = yearly ? plan.priceYearlyPerMonth : plan.priceMonthly;
   const isPopular = plan.popular;
+
+  const currentRank = PLAN_RANK[currentPlanKey] ?? 0;
+  const cardRank = PLAN_RANK[plan.key] ?? 0;
+  const isCurrent = isCurrentActive && plan.key === currentPlanKey;
+  const isDowngrade = isCurrentActive && cardRank < currentRank;
+  const isUpgrade = isCurrentActive && cardRank > currentRank;
 
   return (
     <Card
@@ -125,6 +133,13 @@ function PlanCard({ plan, yearly, onBuy }) {
               '& .MuiChip-icon': { color: plan.chipColor },
             }}
           />
+          {isCurrent && (
+            <Chip
+              label="Đang dùng"
+              size="small"
+              sx={{ fontWeight: 700, fontSize: '0.7rem', bgcolor: '#22c55e', color: '#fff' }}
+            />
+          )}
         </Box>
 
         {/* Price */}
@@ -178,8 +193,9 @@ function PlanCard({ plan, yearly, onBuy }) {
         </Stack>
 
         <Button
-          variant={isPopular ? 'contained' : 'outlined'}
+          variant={isCurrent ? 'contained' : isPopular ? 'contained' : 'outlined'}
           fullWidth
+          disabled={isDowngrade || isCurrent}
           onClick={() => onBuy(plan)}
           sx={{
             mt: 3,
@@ -188,12 +204,22 @@ function PlanCard({ plan, yearly, onBuy }) {
             fontWeight: 700,
             borderRadius: 1.5,
             fontSize: '0.95rem',
-            ...(isPopular
-              ? { bgcolor: plan.color, '&:hover': { bgcolor: plan.color, filter: 'brightness(0.9)' } }
-              : { borderColor: plan.color, color: plan.color, '&:hover': { borderColor: plan.color, bgcolor: `${plan.color}10` } }),
+            ...(isCurrent
+              ? { bgcolor: '#919EAB', color: '#fff', '&.Mui-disabled': { bgcolor: '#919EAB', color: '#fff' } }
+              : isDowngrade
+                ? {}
+                : isPopular
+                  ? { bgcolor: plan.color, '&:hover': { bgcolor: plan.color, filter: 'brightness(0.9)' } }
+                  : { borderColor: plan.color, color: plan.color, '&:hover': { borderColor: plan.color, bgcolor: `${plan.color}10` } }),
           }}
         >
-          Mua gói {plan.name}
+          {isCurrent
+            ? 'Gói hiện tại'
+            : isDowngrade
+              ? 'Không thể hạ gói'
+              : isUpgrade
+                ? `Nâng cấp lên ${plan.name}`
+                : `Mua gói ${plan.name}`}
         </Button>
       </CardContent>
     </Card>
@@ -205,7 +231,7 @@ export default function PricingPage() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const { user } = useAuth();
-  const { refetch } = useSubscription();
+  const { planKey, isActive, refetch } = useSubscription();
   const navigate = useNavigate();
 
   const handleBuy = (plan) => {
@@ -268,7 +294,14 @@ export default function PricingPage() {
         }}
       >
         {PLANS.map((plan) => (
-          <PlanCard key={plan.key} plan={plan} yearly={yearly} onBuy={handleBuy} />
+          <PlanCard
+            key={plan.key}
+            plan={plan}
+            yearly={yearly}
+            onBuy={handleBuy}
+            currentPlanKey={planKey}
+            isCurrentActive={isActive}
+          />
         ))}
       </Box>
 
