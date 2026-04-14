@@ -142,8 +142,8 @@ export function SubscriptionProvider({ children }) {
     };
   }, [fetchSubscription, user?.sub]);
 
-  const planKey = subscription?.status === 'active' ? subscription.planKey : null;
-  const maxAccounts = planKey ? (PLAN_LIMITS[planKey] ?? 0) : 0;
+  const planKey = subscription?.status === 'active' ? subscription.planKey : 'basic';
+  const maxAccounts = PLAN_LIMITS[planKey] ?? PLAN_LIMITS.basic;
   const isActive = subscription?.status === 'active';
   const isExpired = subscription?.status === 'expired';
 

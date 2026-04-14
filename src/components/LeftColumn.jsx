@@ -728,20 +728,17 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     const latestSubscription = await refetchSubscription();
-    const effectivePlanKey = latestSubscription?.status === 'active' ? latestSubscription.planKey : planKey;
-    const effectiveMaxAccounts = effectivePlanKey ? (PLAN_LIMITS[effectivePlanKey] ?? maxAccounts) : maxAccounts;
-    const effectiveIsActive = latestSubscription ? latestSubscription.status === 'active' : isActive;
+    const effectivePlanKey = latestSubscription?.status === 'active' ? latestSubscription.planKey : 'basic';
+    const effectiveMaxAccounts = PLAN_LIMITS[effectivePlanKey] ?? PLAN_LIMITS.basic;
     const currentServerAccountCount = await refreshServerAccountCount();
 
-    if (!effectiveIsActive) {
-      setFeedback({ severity: 'warning', message: 'Bạn cần đăng ký gói để thêm tài khoản Zalo. Vui lòng mua gói tại trang Bảng Giá.' });
-      return;
-    }
-
     if (accounts.length >= effectiveMaxAccounts || currentServerAccountCount >= effectiveMaxAccounts) {
+      const needUpgrade = effectivePlanKey === 'basic' || !latestSubscription?.status || latestSubscription?.status !== 'active';
       setFeedback({
         severity: 'warning',
-        message: `Gói ${effectivePlanKey?.toUpperCase() || 'hiện tại'} chỉ cho phép tối đa ${effectiveMaxAccounts} tài khoản Zalo. Bạn đã đăng ký ${currentServerAccountCount}/${effectiveMaxAccounts} trên hệ thống. Hãy nâng cấp gói để thêm nhiều hơn.`,
+        message: needUpgrade
+          ? `Gói miễn phí chỉ cho phép ${effectiveMaxAccounts} tài khoản Zalo. Hãy mua gói Plus hoặc Pro để thêm nhiều hơn.`
+          : `Gói ${effectivePlanKey?.toUpperCase()} chỉ cho phép tối đa ${effectiveMaxAccounts} tài khoản Zalo. Bạn đã đăng ký ${currentServerAccountCount}/${effectiveMaxAccounts} trên hệ thống. Hãy nâng cấp gói để thêm nhiều hơn.`,
       });
       return;
     }

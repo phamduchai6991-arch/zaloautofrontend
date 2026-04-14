@@ -57,13 +57,14 @@ export default function AccountsPage() {
     if (!subscription && accounts.length === 0) return null;
 
     if (!subscription || (!isActive && !isExpired)) {
+      if (accounts.length > 0) return null; // Free / basic users with accounts — no nag
       return (
         <Alert
-          severity="warning"
+          severity="info"
           sx={{ mb: 2 }}
-          action={<Button color="warning" size="small" onClick={() => navigate('/pricing')}>Mua gói</Button>}
+          action={<Button color="info" size="small" onClick={() => navigate('/pricing')}>Nâng cấp</Button>}
         >
-          Bạn chưa có gói đăng ký. Vui lòng mua gói để dùng tính năng tài khoản Zalo.
+          Bạn đang dùng gói miễn phí (tối đa 1 tài khoản). Nâng cấp để thêm nhiều tài khoản hơn.
         </Alert>
       );
     }
@@ -100,10 +101,14 @@ export default function AccountsPage() {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Box>
           <Typography variant="h6" fontWeight={700}>Tài Khoản Zalo</Typography>
-          {isActive && (
+          {isActive ? (
             <Typography variant="caption" color="text.secondary">
               Gói <strong>{PLAN_LABELS[planKey] || planKey}</strong> — {accounts.length}/{maxAccounts} tài khoản •{' '}
               còn {daysLeft} ngày
+            </Typography>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              Gói miễn phí — {accounts.length}/{maxAccounts} tài khoản
             </Typography>
           )}
         </Box>
