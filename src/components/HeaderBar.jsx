@@ -117,7 +117,7 @@ export default function HeaderBar() {
         {/* Mua Gói */}
         <Button
           size="small"
-          onClick={() => navigate('/pricing')}
+          onClick={() => window.location.assign('/pricing')}
           sx={{
             fontSize: '0.8rem',
             fontWeight: 700,
