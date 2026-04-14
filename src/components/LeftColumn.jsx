@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Alert,
   Avatar,
@@ -41,6 +41,8 @@ import {
   Search as SearchIcon,
   Send as SendIcon,
   Settings as SettingsIcon,
+  Pause as PauseIcon,
+  PlayArrow as PlayArrowIcon,
 } from '@mui/icons-material';
 import { useAccount } from '../contexts/AccountContext';
 import { PLAN_LIMITS, useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
@@ -419,11 +421,12 @@ function delay(ms) {
   });
 }
 
-async function readNdjsonStream(response, onLine, onDone) {
+async function readNdjsonStream(response, onLine, onDone, waitIfPausedFn) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
+    if (waitIfPausedFn) await waitIfPausedFn();
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -533,6 +536,30 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  const pauseResolveRef = useRef(null);
+
+  const waitIfPaused = useCallback(() => {
+    if (!pausedRef.current) return Promise.resolve();
+    return new Promise((resolve) => { pauseResolveRef.current = resolve; });
+  }, []);
+
+  const handlePauseToggle = useCallback(() => {
+    if (pausedRef.current) {
+      // Resume
+      pausedRef.current = false;
+      setPaused(false);
+      if (pauseResolveRef.current) {
+        pauseResolveRef.current();
+        pauseResolveRef.current = null;
+      }
+    } else {
+      // Pause
+      pausedRef.current = true;
+      setPaused(true);
+    }
+  }, []);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
   const [settingsMenuAnchor, setSettingsMenuAnchor] = useState(null);
@@ -832,6 +859,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const handleStart = async () => {
     if (running) return;
     setRunning(true);
+    setPaused(false);
+    pausedRef.current = false;
     try {
     if (!isActive) {
       setFeedback({
@@ -1153,7 +1182,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
                   message: data.statusLabel || `Đã xử lý ${actionAccepted + actionFailed}/${actionRecords.length}`,
                 });
               }
-            });
+            }, undefined, waitIfPaused);
 
             actionSummary = {
               severity: actionFailed > 0 ? 'warning' : 'success',
@@ -1217,6 +1246,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       }
     }
 
+    // ── Pause checkpoint between actions and invites ──
+    await waitIfPaused();
+
     if (!isScheduled && inviteRecords.length > 0) {
       let resolvedInviteJobs = [];
       let backendInviteOk = false;
@@ -1247,7 +1279,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               if (data.status !== 'running') {
                 resolvedInviteJobs.push(mergedJob);
               }
-            });
+            }, undefined, waitIfPaused);
           }
         } catch (_) {
           // Backend unreachable — fall through to extension
@@ -1347,6 +1379,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       }
     }
 
+    // ── Pause checkpoint between invites and messages ──
+    await waitIfPaused();
+
     if (!isScheduled && messageRecords.length > 0) {
       let backendOk = false;
 
@@ -1394,7 +1429,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             }, (summary) => {
               accepted = summary.accepted || 0;
               failed = summary.failed || 0;
-            });
+            }, waitIfPaused);
 
             messageSummary = {
               severity: failed > 0 ? 'warning' : 'success',
@@ -1461,6 +1496,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
     } finally {
       setRunning(false);
+      setPaused(false);
+      pausedRef.current = false;
     }
   };
 
@@ -2082,28 +2119,49 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           />
         </Box>
 
-        <Button
-          variant="contained"
-          size="large"
-          type="button"
-          disabled={running}
-          endIcon={running ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : <SendIcon />}
-          onClick={handleStart}
-          sx={{
-            width: 200,
-            height: 48,
-            fontWeight: 700,
-            fontSize: '0.9rem',
-            borderRadius: '8px',
-            bgcolor: running ? '#919EAB' : 'rgb(32,101,209)',
-            boxShadow: 'none',
-            textTransform: 'none',
-            '&:hover': { bgcolor: running ? '#919EAB' : 'rgb(24, 80, 170)' },
-            '&.Mui-disabled': { bgcolor: '#919EAB', color: '#fff' },
-          }}
-        >
-          {running ? 'Đang chạy...' : 'Bắt Đầu'}
-        </Button>
+        {running ? (
+          <Button
+            variant="contained"
+            size="large"
+            type="button"
+            endIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
+            onClick={handlePauseToggle}
+            sx={{
+              width: 200,
+              height: 48,
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              borderRadius: '8px',
+              bgcolor: paused ? '#f59e0b' : '#ff5630',
+              boxShadow: 'none',
+              textTransform: 'none',
+              '&:hover': { bgcolor: paused ? '#d97706' : '#cc4526' },
+            }}
+          >
+            {paused ? 'Tiếp tục' : 'Tạm dừng'}
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            size="large"
+            type="button"
+            endIcon={<SendIcon />}
+            onClick={handleStart}
+            sx={{
+              width: 200,
+              height: 48,
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              borderRadius: '8px',
+              bgcolor: 'rgb(32,101,209)',
+              boxShadow: 'none',
+              textTransform: 'none',
+              '&:hover': { bgcolor: 'rgb(24, 80, 170)' },
+            }}
+          >
+            Bắt Đầu
+          </Button>
+        )}
 
         <Box sx={{ position: 'relative' }}>
           <Button
