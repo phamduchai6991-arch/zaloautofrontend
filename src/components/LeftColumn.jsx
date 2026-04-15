@@ -43,6 +43,7 @@ import {
   Settings as SettingsIcon,
   Pause as PauseIcon,
   PlayArrow as PlayArrowIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { useAccount } from '../contexts/AccountContext';
 import { PLAN_LIMITS, useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
@@ -440,32 +441,38 @@ function delay(ms) {
   });
 }
 
-async function readNdjsonStream(response, onLine, onDone, waitIfPausedFn) {
+async function readNdjsonStream(response, onLine, onDone, waitIfPausedFn, stoppedRef) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  while (true) {
-    if (waitIfPausedFn) await waitIfPausedFn();
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const data = JSON.parse(line);
-        if (data._done) { onDone?.(data); }
-        else { onLine(data); }
-      } catch (_) { /* skip malformed line */ }
+  try {
+    while (true) {
+      if (stoppedRef?.current) break;
+      if (waitIfPausedFn) await waitIfPausedFn();
+      if (stoppedRef?.current) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          if (data._done) { onDone?.(data); }
+          else { onLine(data); }
+        } catch (_) { /* skip malformed line */ }
+      }
     }
-  }
-  if (buffer.trim()) {
-    try {
-      const data = JSON.parse(buffer);
-      if (data._done) onDone?.(data);
-      else onLine(data);
-    } catch (_) { /* skip */ }
+    if (buffer.trim()) {
+      try {
+        const data = JSON.parse(buffer);
+        if (data._done) onDone?.(data);
+        else onLine(data);
+      } catch (_) { /* skip */ }
+    }
+  } finally {
+    try { reader.cancel(); } catch (_) { /* already closed */ }
   }
 }
 
@@ -568,6 +575,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   const pauseResolveRef = useRef(null);
+  const stoppedRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
   const waitIfPaused = useCallback(() => {
     if (!pausedRef.current) return Promise.resolve();
@@ -589,6 +598,26 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setPaused(true);
     }
   }, []);
+
+  const handleStop = useCallback(() => {
+    stoppedRef.current = true;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // Also resume if paused so the loop can exit
+    if (pausedRef.current) {
+      pausedRef.current = false;
+      setPaused(false);
+      if (pauseResolveRef.current) {
+        pauseResolveRef.current();
+        pauseResolveRef.current = null;
+      }
+    }
+    setRunning(false);
+    setFeedback({ severity: 'warning', message: 'Đã dừng tất cả thao tác.' });
+  }, []);
+
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
   const [settingsMenuAnchor, setSettingsMenuAnchor] = useState(null);
@@ -991,6 +1020,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     setRunning(true);
     setPaused(false);
     pausedRef.current = false;
+    stoppedRef.current = false;
+    abortControllerRef.current = new AbortController();
     try {
     if (!isActive) {
       setFeedback({
@@ -1343,6 +1374,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               account: activeAccount,
               jobs: actionRecords,
             }),
+            signal: abortControllerRef.current?.signal,
           });
 
           if (res.ok && res.body) {
@@ -1368,7 +1400,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
                   message: data.statusLabel || `Đã xử lý ${actionAccepted + actionFailed}/${actionRecords.length}`,
                 });
               }
-            }, undefined, waitIfPaused);
+            }, undefined, waitIfPaused, stoppedRef);
 
             actionSummary = {
               severity: actionFailed > 0 ? 'warning' : 'success',
@@ -1438,8 +1470,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       }
     }
 
-    // ── Pause checkpoint between actions and invites ──
+    // ── Pause/Stop checkpoint between actions and invites ──
     await waitIfPaused();
+    if (stoppedRef.current) { return; }
 
     if (!isScheduled && inviteRecords.length > 0) {
       let resolvedInviteJobs = [];
@@ -1484,6 +1517,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
+            signal: abortControllerRef.current?.signal,
           });
 
           if (res.ok && res.body) {
@@ -1505,7 +1539,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               if (data.status !== 'running') {
                 resolvedInviteJobs.push(mergedJob);
               }
-            }, undefined, waitIfPaused);
+            }, undefined, waitIfPaused, stoppedRef);
           }
         } catch (_) {
           // Backend unreachable — fall through to extension
@@ -1610,8 +1644,9 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       }
     }
 
-    // ── Pause checkpoint between invites and messages ──
+    // ── Pause/Stop checkpoint between invites and messages ──
     await waitIfPaused();
+    if (stoppedRef.current) { return; }
 
     if (!isScheduled && messageRecords.length > 0) {
       let backendOk = false;
@@ -1647,6 +1682,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               messageTemplates: msgTemplates.length > 0 ? msgTemplates : [],
               rotateMessageEvery: Math.max(1, parseInt(rotateMsgEvery, 10) || 100),
             }),
+            signal: abortControllerRef.current?.signal,
           });
 
           if (res.ok && res.body) {
@@ -1662,7 +1698,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             }, (summary) => {
               accepted = summary.accepted || 0;
               failed = summary.failed || 0;
-            }, waitIfPaused);
+            }, waitIfPaused, stoppedRef);
 
             messageSummary = {
               severity: failed > 0 ? 'warning' : 'success',
@@ -1762,6 +1798,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       setRunning(false);
       setPaused(false);
       pausedRef.current = false;
+      stoppedRef.current = false;
+      abortControllerRef.current = null;
     }
   };
 
@@ -2779,26 +2817,48 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         {/* Row 2: Action buttons */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {running ? (
-            <Button
-              variant="contained"
-              size="medium"
-              type="button"
-              endIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
-              onClick={handlePauseToggle}
-              sx={{
-                flex: 1,
-                height: 44,
-                fontWeight: 700,
-                fontSize: '0.9rem',
-                borderRadius: '8px',
-                bgcolor: paused ? '#f59e0b' : '#ff5630',
-                boxShadow: 'none',
-                textTransform: 'none',
-                '&:hover': { bgcolor: paused ? '#d97706' : '#cc4526' },
-              }}
-            >
-              {paused ? 'Tiếp tục' : 'Tạm dừng'}
-            </Button>
+            <>
+              <Button
+                variant="contained"
+                size="medium"
+                type="button"
+                endIcon={paused ? <PlayArrowIcon /> : <PauseIcon />}
+                onClick={handlePauseToggle}
+                sx={{
+                  flex: 1,
+                  height: 44,
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  bgcolor: paused ? '#f59e0b' : '#64748b',
+                  boxShadow: 'none',
+                  textTransform: 'none',
+                  '&:hover': { bgcolor: paused ? '#d97706' : '#475569' },
+                }}
+              >
+                {paused ? 'Tiếp tục' : 'Tạm dừng'}
+              </Button>
+              <Button
+                variant="contained"
+                size="medium"
+                type="button"
+                endIcon={<StopIcon />}
+                onClick={handleStop}
+                sx={{
+                  flex: 1,
+                  height: 44,
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  bgcolor: '#ff5630',
+                  boxShadow: 'none',
+                  textTransform: 'none',
+                  '&:hover': { bgcolor: '#cc4526' },
+                }}
+              >
+                Dừng
+              </Button>
+            </>
           ) : (
             <Button
               variant="contained"
