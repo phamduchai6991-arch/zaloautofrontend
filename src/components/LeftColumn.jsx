@@ -68,6 +68,13 @@ import {
   CONTROL_DEFINITIONS,
 } from '../utils/reachActionConfig';
 import { hideContactsForAccount } from '../utils/reachVisibilityStore';
+import {
+  getAllLimits,
+  setAllAccountsLimits,
+  getAccountLimits,
+  getRemainingQuota,
+  addAccountUsage,
+} from '../utils/dailyLimitsStore';
 
 const QUICK_TEMPLATES = [
   'Chào bạn, mình kết nối để trao đổi công việc nếu bạn thuận tiện nhé.',
@@ -586,6 +593,8 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   const [rewriteDialog, setRewriteDialog] = useState({ open: false, target: 'message', options: [] });
   const [settingsMenuAnchor, setSettingsMenuAnchor] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [limitsDialogOpen, setLimitsDialogOpen] = useState(false);
+  const [limitsData, setLimitsData] = useState({});
 
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [pullGroupFriendIds, setPullGroupFriendIds] = useState([]);
@@ -1212,6 +1221,62 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       ? [...actionRecords, ...inviteRecords, ...messageRecords]
       : [];
 
+    // ─── Enforce daily limits ───
+    const accountId = activeAccount?.id || activeAccount?.userId || '';
+    const quota = getRemainingQuota(accountId);
+    let limitWarnings = [];
+
+    if (messageRecords.length > 0 && quota.messages !== Infinity) {
+      if (quota.messages <= 0) {
+        limitWarnings.push(`Nhắn tin: đã đạt giới hạn hôm nay`);
+        messageRecords.length = 0;
+      } else if (messageRecords.length > quota.messages) {
+        limitWarnings.push(`Nhắn tin: cắt từ ${messageRecords.length} → ${quota.messages} (giới hạn ngày)`);
+        messageRecords.length = quota.messages;
+      }
+    }
+
+    if (inviteRecords.length > 0 && quota.friendRequests !== Infinity) {
+      if (quota.friendRequests <= 0) {
+        limitWarnings.push(`Kết bạn: đã đạt giới hạn hôm nay`);
+        inviteRecords.length = 0;
+      } else if (inviteRecords.length > quota.friendRequests) {
+        limitWarnings.push(`Kết bạn: cắt từ ${inviteRecords.length} → ${quota.friendRequests} (giới hạn ngày)`);
+        inviteRecords.length = quota.friendRequests;
+      }
+    }
+
+    if (joinGroupEnabled && actionRecords.length > 0 && quota.joinGroups !== Infinity) {
+      const joinRecords = actionRecords.filter((r) => r.action === 'joinGroup' || r.type === 'joinGroup');
+      if (joinRecords.length > 0) {
+        if (quota.joinGroups <= 0) {
+          limitWarnings.push(`Tham gia nhóm: đã đạt giới hạn hôm nay`);
+          // Remove join group records from actionRecords
+          for (let i = actionRecords.length - 1; i >= 0; i--) {
+            if (actionRecords[i].action === 'joinGroup' || actionRecords[i].type === 'joinGroup') {
+              actionRecords.splice(i, 1);
+            }
+          }
+        } else if (joinRecords.length > quota.joinGroups) {
+          limitWarnings.push(`Tham gia nhóm: cắt từ ${joinRecords.length} → ${quota.joinGroups} (giới hạn ngày)`);
+          let kept = 0;
+          for (let i = actionRecords.length - 1; i >= 0; i--) {
+            if (actionRecords[i].action === 'joinGroup' || actionRecords[i].type === 'joinGroup') {
+              kept++;
+              if (kept > quota.joinGroups) actionRecords.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+
+    if (limitWarnings.length > 0) {
+      setFeedback({ severity: 'warning', message: limitWarnings.join('. ') + '.' });
+      if (messageRecords.length === 0 && inviteRecords.length === 0 && actionRecords.length === 0) {
+        return;
+      }
+    }
+
     onCampaignCommit?.({
       actionJobs: isScheduled ? [] : actionRecords,
       inviteJobs: isScheduled ? [] : inviteRecords,
@@ -1309,6 +1374,12 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               severity: actionFailed > 0 ? 'warning' : 'success',
               message: `Server đã xử lý ${actionAccepted}/${actionRecords.length} thao tác.${actionFailed > 0 ? ` ${actionFailed} thất bại.` : ''}`,
             };
+
+            // Track daily usage for join group actions
+            if (accountId && joinGroupEnabled) {
+              const joinCount = actionRecords.filter((r) => (r.action === 'joinGroup' || r.type === 'joinGroup') && r.status !== 'failed').length;
+              if (joinCount > 0) addAccountUsage(accountId, 'joinGroups', joinCount);
+            }
           }
         } catch (_) {
           // Backend unreachable — fall through
@@ -1483,6 +1554,11 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         const processedCount = resolvedInviteJobs.filter((job) => job.status !== 'failed').length;
         const failedCount = resolvedInviteJobs.length - processedCount;
 
+        // Track daily usage for friend requests
+        if (processedCount > 0 && accountId) {
+          addAccountUsage(accountId, 'friendRequests', processedCount);
+        }
+
         if (processedCount > 0 && failedCount === 0) {
           inviteSummary = {
             severity: 'success',
@@ -1592,6 +1668,11 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               severity: failed > 0 ? 'warning' : 'success',
               message: `Server đã gửi ${accepted}/${messageRecords.length} tin nhắn.${failed > 0 ? ` ${failed} thất bại.` : ''}`,
             };
+
+            // Track daily usage for messages
+            if (accepted > 0 && accountId) {
+              addAccountUsage(accountId, 'messages', accepted);
+            }
           } else if (res.status > 0) {
             // Backend reachable but returned error — don't fallback to extension
             backendOk = true;
@@ -1702,6 +1783,20 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
             <SettingsIcon fontSize="small" />
           </IconButton>
           <Menu anchorEl={settingsMenuAnchor} open={Boolean(settingsMenuAnchor)} onClose={() => setSettingsMenuAnchor(null)}>
+            <MenuItem onClick={() => {
+              setSettingsMenuAnchor(null);
+              // Load current limits for all accounts into dialog state
+              const currentLimits = getAllLimits();
+              const data = {};
+              accounts.forEach((acc) => {
+                const id = acc.id || acc.userId || '';
+                data[id] = { ...{ messages: 0, friendRequests: 0, joinGroups: 0 }, ...currentLimits[id], _account: acc };
+              });
+              setLimitsData(data);
+              setLimitsDialogOpen(true);
+            }}>
+              <SettingsIcon fontSize="small" sx={{ mr: 1 }} /> Cài đặt giới hạn hàng ngày
+            </MenuItem>
             <MenuItem onClick={() => { setSettingsMenuAnchor(null); setDeleteConfirmOpen(true); }} disabled={activeAccountIndex < 0}>
               <DeleteIcon fontSize="small" sx={{ mr: 1 }} /> Xóa tài khoản đang chọn
             </MenuItem>
@@ -2018,6 +2113,100 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           }}>
             Xóa
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ─── Daily Limits Dialog ─── */}
+      <Dialog open={limitsDialogOpen} onClose={() => setLimitsDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, textAlign: 'center' }}>Cài đặt giới hạn hàng ngày</DialogTitle>
+        <DialogContent>
+          {accounts.length === 0 ? (
+            <Typography color="text.secondary" textAlign="center" sx={{ py: 3 }}>Chưa có tài khoản nào.</Typography>
+          ) : (
+            <>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 700 }}></TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="center">Nhắn tin</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="center">Kết bạn</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="center">Tham gia nhóm</TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {accounts.map((acc) => {
+                    const id = acc.id || acc.userId || '';
+                    const d = limitsData[id] || { messages: 0, friendRequests: 0, joinGroups: 0 };
+                    const updateField = (field, val) => {
+                      const n = parseInt(val, 10);
+                      setLimitsData((prev) => ({ ...prev, [id]: { ...prev[id], [field]: isNaN(n) ? 0 : Math.max(0, n) } }));
+                    };
+                    return (
+                      <TableRow key={id}>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Avatar src={acc.avatar} sx={{ width: 32, height: 32 }} />
+                            <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>{acc.name || 'Chưa rõ'}</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={d.messages || 0}
+                            onChange={(e) => updateField('messages', e.target.value)}
+                            inputProps={{ min: 0, style: { textAlign: 'center', width: 60 } }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={d.friendRequests || 0}
+                            onChange={(e) => updateField('friendRequests', e.target.value)}
+                            inputProps={{ min: 0, style: { textAlign: 'center', width: 60 } }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={d.joinGroups || 0}
+                            onChange={(e) => updateField('joinGroups', e.target.value)}
+                            inputProps={{ min: 0, style: { textAlign: 'center', width: 60 } }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton size="small" color="error" onClick={() => {
+                            setLimitsData((prev) => ({ ...prev, [id]: { ...prev[id], messages: 0, friendRequests: 0, joinGroups: 0, _account: acc } }));
+                          }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+                Để 0 = không giới hạn. Giới hạn sẽ được đếm theo ngày và tự động reset mỗi ngày mới.
+              </Typography>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button onClick={() => setLimitsDialogOpen(false)} variant="outlined" color="error">Hủy</Button>
+          <Button variant="contained" onClick={() => {
+            const toSave = {};
+            for (const [id, d] of Object.entries(limitsData)) {
+              const { _account, ...rest } = d;
+              toSave[id] = rest;
+            }
+            setAllAccountsLimits(toSave);
+            setLimitsDialogOpen(false);
+            setFeedback({ severity: 'success', message: 'Đã lưu giới hạn hàng ngày.' });
+          }}>Lưu</Button>
         </DialogActions>
       </Dialog>
 
