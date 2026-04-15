@@ -1278,13 +1278,13 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     }
 
     if (joinGroupEnabled && actionRecords.length > 0 && quota.joinGroups !== Infinity) {
-      const joinRecords = actionRecords.filter((r) => r.action === 'joinGroup' || r.type === 'joinGroup');
+      const joinRecords = actionRecords.filter((r) => r.actionType === 'join_group');
       if (joinRecords.length > 0) {
         if (quota.joinGroups <= 0) {
           limitWarnings.push(`Tham gia nhóm: đã đạt giới hạn hôm nay`);
           // Remove join group records from actionRecords
           for (let i = actionRecords.length - 1; i >= 0; i--) {
-            if (actionRecords[i].action === 'joinGroup' || actionRecords[i].type === 'joinGroup') {
+            if (actionRecords[i].actionType === 'join_group') {
               actionRecords.splice(i, 1);
             }
           }
@@ -1292,7 +1292,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           limitWarnings.push(`Tham gia nhóm: cắt từ ${joinRecords.length} → ${quota.joinGroups} (giới hạn ngày)`);
           let kept = 0;
           for (let i = actionRecords.length - 1; i >= 0; i--) {
-            if (actionRecords[i].action === 'joinGroup' || actionRecords[i].type === 'joinGroup') {
+            if (actionRecords[i].actionType === 'join_group') {
               kept++;
               if (kept > quota.joinGroups) actionRecords.splice(i, 1);
             }
@@ -1409,7 +1409,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
             // Track daily usage for join group actions
             if (accountId && joinGroupEnabled) {
-              const joinCount = actionRecords.filter((r) => (r.action === 'joinGroup' || r.type === 'joinGroup') && r.status !== 'failed').length;
+              const joinCount = actionRecords.filter((r) => r.actionType === 'join_group' && r.status !== 'failed').length;
               if (joinCount > 0) addAccountUsage(accountId, 'joinGroups', joinCount);
             }
           }
@@ -1467,6 +1467,20 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           severity: 'warning',
           message: 'Không thể thực thi thao tác: backend và extension đều không khả dụng.',
         };
+      }
+
+      // Apply optimistic UI update: remove friends/groups from local state
+      if (backendActionOk && activeAccount?.id) {
+        const patch = applyOptimisticActionResults(activeAccount, actionRecords);
+        if (patch) {
+          updateAccountById(activeAccount.id, patch);
+        }
+        // Also sync fresh data from server
+        try {
+          await refreshActiveAccountFromService();
+        } catch (_) {
+          // Keep optimistic state if server sync temporarily unavailable
+        }
       }
     }
 
