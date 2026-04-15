@@ -12,6 +12,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   InputAdornment,
   MenuItem,
   Paper,
@@ -37,6 +38,11 @@ import {
   Lock as LockIcon,
   Visibility,
   VisibilityOff,
+  LibraryBooks as LibraryIcon,
+  Category as CategoryIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { notifySubscriptionChanged } from '../contexts/SubscriptionContext';
 
@@ -114,6 +120,19 @@ export default function AdminPage() {
   const [grantPeriod, setGrantPeriod] = useState('monthly');
   const [grantSubmitting, setGrantSubmitting] = useState(false);
 
+  // Group library state
+  const [categories, setCategories] = useState([]);
+  const [libraryGroups, setLibraryGroups] = useState([]);
+  const [glLoading, setGlLoading] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatColor, setNewCatColor] = useState('#1976d2');
+  const [editingCat, setEditingCat] = useState(null);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkCategoryId, setBulkCategoryId] = useState('');
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [glFilterCat, setGlFilterCat] = useState('');
+  const [editingGroup, setEditingGroup] = useState(null);
+
   const adminFetch = useCallback(
     async (path, currentToken = token) => {
       const res = await fetch(`${API_BASE}${path}`, {
@@ -142,6 +161,25 @@ export default function AdminPage() {
     [adminFetch, token],
   );
 
+  const loadGroupLibrary = useCallback(
+    async (currentToken = token) => {
+      setGlLoading(true);
+      try {
+        const [catData, grData] = await Promise.all([
+          adminFetch('/api/admin/group-library/categories', currentToken),
+          adminFetch('/api/admin/group-library/groups', currentToken),
+        ]);
+        setCategories(catData.categories || []);
+        setLibraryGroups(grData.groups || []);
+      } catch {
+        // silently ignore — data will appear empty
+      } finally {
+        setGlLoading(false);
+      }
+    },
+    [adminFetch, token],
+  );
+
   React.useEffect(() => {
     if (!token || authenticated) return;
 
@@ -163,6 +201,11 @@ export default function AdminPage() {
       active = false;
     };
   }, [authenticated, loadDashboard, token]);
+
+  // Load group library data when tab switches to it
+  React.useEffect(() => {
+    if (authenticated && tab === 2) loadGroupLibrary();
+  }, [authenticated, tab, loadGroupLibrary]);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) return;
@@ -260,8 +303,132 @@ export default function AdminPage() {
     setStats(null);
     setUsers(null);
     setOrders(null);
+    setCategories([]);
+    setLibraryGroups([]);
     sessionStorage.removeItem(ADMIN_TOKEN_KEY);
   };
+
+  // ─── Group Library handlers ───
+
+  const handleAddCategory = async () => {
+    if (!newCatName.trim()) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: newCatName.trim(), color: newCatColor }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi tạo danh mục.');
+      setNewCatName('');
+      setNewCatColor('#1976d2');
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    }
+  };
+
+  const handleUpdateCategory = async () => {
+    if (!editingCat) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/categories`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: editingCat.id, name: editingCat.name, color: editingCat.color }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi cập nhật danh mục.');
+      setEditingCat(null);
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    }
+  };
+
+  const handleDeleteCategory = async (id) => {
+    if (!window.confirm('Xoá danh mục này? Nhóm thuộc danh mục sẽ thành "Chưa phân loại".')) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/categories`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi xoá danh mục.');
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    }
+  };
+
+  const handleBulkAddGroups = async () => {
+    if (!bulkText.trim()) return;
+    setBulkSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ lines: bulkText, categoryId: bulkCategoryId || null }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi thêm nhóm.');
+      setSuccessMessage(`Đã thêm ${data.count} nhóm thành công.`);
+      setBulkText('');
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  const handleDeleteGroup = async (id) => {
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/groups`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi xoá nhóm.');
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    }
+  };
+
+  const handleUpdateGroup = async () => {
+    if (!editingGroup) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/group-library/groups`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          id: editingGroup.id,
+          name: editingGroup.name,
+          inviteLink: editingGroup.invite_link,
+          description: editingGroup.description,
+          categoryId: editingGroup.category_id,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Lỗi cập nhật nhóm.');
+      setEditingGroup(null);
+      await loadGroupLibrary();
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    }
+  };
+
+  const filteredLibraryGroups = glFilterCat
+    ? libraryGroups.filter((g) => String(g.category_id) === String(glFilterCat))
+    : libraryGroups;
 
   if (!authenticated) {
     return (
@@ -400,6 +567,7 @@ export default function AdminPage() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab label={`Người dùng (${users?.length ?? '…'})`} />
         <Tab label={`Đơn hàng (${orders?.length ?? '…'})`} />
+        <Tab icon={<LibraryIcon />} iconPosition="start" label={`Thư viện nhóm (${libraryGroups.length})`} />
       </Tabs>
 
       {tab === 0 && (
@@ -557,6 +725,254 @@ export default function AdminPage() {
           )}
         </Paper>
       )}
+
+      {tab === 2 && (
+        <Box>
+          {glLoading ? (
+            <Box sx={{ p: 4, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box>
+          ) : (
+            <Stack spacing={3}>
+              {/* ─── Category Management ─── */}
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CategoryIcon fontSize="small" /> Danh mục
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+                  {categories.map((cat) => (
+                    <Chip
+                      key={cat.id}
+                      label={cat.name}
+                      sx={{ bgcolor: cat.color, color: '#fff', fontWeight: 600 }}
+                      onDelete={() => handleDeleteCategory(cat.id)}
+                      onClick={() => setEditingCat({ ...cat })}
+                    />
+                  ))}
+                  {categories.length === 0 && (
+                    <Typography variant="body2" color="text.secondary">Chưa có danh mục nào.</Typography>
+                  )}
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    placeholder="Tên danh mục mới"
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+                    sx={{ flex: 1 }}
+                  />
+                  <input
+                    type="color"
+                    value={newCatColor}
+                    onChange={(e) => setNewCatColor(e.target.value)}
+                    style={{ width: 36, height: 36, border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                  />
+                  <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={handleAddCategory} disabled={!newCatName.trim()}>
+                    Thêm
+                  </Button>
+                </Box>
+              </Paper>
+
+              {/* ─── Bulk Import ─── */}
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AddIcon fontSize="small" /> Thêm nhóm hàng loạt
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                  Mỗi dòng 1 nhóm. Định dạng: <b>Tên nhóm | Link mời | Mô tả</b> (chỉ cần link cũng được)
+                </Typography>
+                <TextField
+                  multiline
+                  minRows={4}
+                  maxRows={12}
+                  fullWidth
+                  placeholder={`Nhóm Tài chính VN | https://zalo.me/g/abc123 | Nhóm trao đổi tài chính\nhttps://zalo.me/g/xyz456\nNhóm BDS Sài Gòn | https://zalo.me/g/bds789`}
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  sx={{ mb: 1.5 }}
+                />
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField
+                    select
+                    size="small"
+                    label="Danh mục"
+                    value={bulkCategoryId}
+                    onChange={(e) => setBulkCategoryId(e.target.value)}
+                    sx={{ minWidth: 180 }}
+                  >
+                    <MenuItem value="">— Chưa phân loại —</MenuItem>
+                    {categories.map((cat) => (
+                      <MenuItem key={cat.id} value={cat.id}>{cat.name}</MenuItem>
+                    ))}
+                  </TextField>
+                  <Button
+                    variant="contained"
+                    onClick={handleBulkAddGroups}
+                    disabled={bulkSubmitting || !bulkText.trim()}
+                    startIcon={bulkSubmitting ? <CircularProgress size={14} color="inherit" /> : <AddIcon />}
+                  >
+                    {bulkSubmitting ? 'Đang thêm...' : 'Thêm nhóm'}
+                  </Button>
+                </Box>
+              </Paper>
+
+              {/* ─── Group List ─── */}
+              <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                <Box sx={{ p: 1.5, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" fontWeight={700}>Lọc:</Typography>
+                  <Chip
+                    label="Tất cả"
+                    size="small"
+                    variant={!glFilterCat ? 'filled' : 'outlined'}
+                    color={!glFilterCat ? 'primary' : 'default'}
+                    onClick={() => setGlFilterCat('')}
+                  />
+                  {categories.map((cat) => (
+                    <Chip
+                      key={cat.id}
+                      label={cat.name}
+                      size="small"
+                      variant={String(glFilterCat) === String(cat.id) ? 'filled' : 'outlined'}
+                      sx={String(glFilterCat) === String(cat.id) ? { bgcolor: cat.color, color: '#fff' } : {}}
+                      onClick={() => setGlFilterCat(String(glFilterCat) === String(cat.id) ? '' : String(cat.id))}
+                    />
+                  ))}
+                </Box>
+                <Divider />
+                <Box sx={{ overflowX: 'auto' }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: 'action.hover' }}>
+                        <TableCell sx={{ fontWeight: 700 }}>#</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Tên nhóm</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Link mời</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Mô tả</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Danh mục</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Ngày thêm</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }} align="right">Thao tác</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {filteredLibraryGroups.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center" sx={{ color: 'text.secondary', py: 4 }}>
+                            Chưa có nhóm nào trong thư viện.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredLibraryGroups.map((g, idx) => (
+                          <TableRow key={g.id} hover>
+                            <TableCell>{idx + 1}</TableCell>
+                            <TableCell>
+                              <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>{g.name || '—'}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption" noWrap sx={{ maxWidth: 220, display: 'block' }}>
+                                {g.invite_link || '—'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption" noWrap sx={{ maxWidth: 160 }}>{g.description || '—'}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              {g.category_name ? (
+                                <Chip label={g.category_name} size="small" sx={{ bgcolor: g.category_color, color: '#fff', fontWeight: 600 }} />
+                              ) : (
+                                <Typography variant="caption" color="text.disabled">Chưa phân loại</Typography>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption">{fmtDateTime(g.created_at)}</Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <IconButton size="small" onClick={() => setEditingGroup({ ...g })}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" color="error" onClick={() => handleDeleteGroup(g.id)}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </Box>
+              </Paper>
+            </Stack>
+          )}
+        </Box>
+      )}
+
+      {/* ─── Edit Category Dialog ─── */}
+      <Dialog open={Boolean(editingCat)} onClose={() => setEditingCat(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Sửa danh mục</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              label="Tên danh mục"
+              value={editingCat?.name || ''}
+              onChange={(e) => setEditingCat((prev) => prev ? { ...prev, name: e.target.value } : null)}
+            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2">Màu:</Typography>
+              <input
+                type="color"
+                value={editingCat?.color || '#1976d2'}
+                onChange={(e) => setEditingCat((prev) => prev ? { ...prev, color: e.target.value } : null)}
+                style={{ width: 40, height: 36, border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              />
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditingCat(null)}>Hủy</Button>
+          <Button onClick={handleUpdateCategory} variant="contained">Lưu</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ─── Edit Group Dialog ─── */}
+      <Dialog open={Boolean(editingGroup)} onClose={() => setEditingGroup(null)} fullWidth maxWidth="sm">
+        <DialogTitle>Sửa nhóm</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              label="Tên nhóm"
+              value={editingGroup?.name || ''}
+              onChange={(e) => setEditingGroup((prev) => prev ? { ...prev, name: e.target.value } : null)}
+            />
+            <TextField
+              fullWidth
+              label="Link mời"
+              value={editingGroup?.invite_link || ''}
+              onChange={(e) => setEditingGroup((prev) => prev ? { ...prev, invite_link: e.target.value } : null)}
+            />
+            <TextField
+              fullWidth
+              label="Mô tả"
+              value={editingGroup?.description || ''}
+              onChange={(e) => setEditingGroup((prev) => prev ? { ...prev, description: e.target.value } : null)}
+            />
+            <TextField
+              select
+              fullWidth
+              label="Danh mục"
+              value={editingGroup?.category_id || ''}
+              onChange={(e) => setEditingGroup((prev) => prev ? { ...prev, category_id: e.target.value || null } : null)}
+            >
+              <MenuItem value="">— Chưa phân loại —</MenuItem>
+              {categories.map((cat) => (
+                <MenuItem key={cat.id} value={cat.id}>{cat.name}</MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditingGroup(null)}>Hủy</Button>
+          <Button onClick={handleUpdateGroup} variant="contained">Lưu</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={grantDialogOpen} onClose={handleCloseGrantDialog} fullWidth maxWidth="xs">
         <DialogTitle>Nâng cấp gói tài khoản</DialogTitle>

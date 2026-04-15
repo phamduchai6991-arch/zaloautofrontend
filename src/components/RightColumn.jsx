@@ -70,6 +70,7 @@ import { checkLocalZaloService, resolveGroupInviteTargetsViaBackend, resolveGrou
 import { resolveUserTargetsViaExtension } from '../utils/extensionBridge';
 import { useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
 
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const FRIEND_COLLECTIONS_KEY = 'zt_friend_collections';
 const GROUP_COLLECTIONS_KEY = 'zt_group_collections';
 const DEFAULT_FRIEND_COLLECTION = 'Chưa phân loại';
@@ -160,6 +161,9 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   const [friendCollections, setFriendCollections] = useState(() => loadStoredCollections(FRIEND_COLLECTIONS_KEY));
   const [groupCollections, setGroupCollections] = useState(() => loadStoredCollections(GROUP_COLLECTIONS_KEY));
   const [groupLibraryEntries, setGroupLibraryEntries] = useState(() => loadGroupLibraryEntries());
+  const [serverLibraryGroups, setServerLibraryGroups] = useState([]);
+  const [serverCategories, setServerCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [viewState, setViewState] = useState(LOCAL_VIEW_DEFAULTS);
   const [hiddenContactIds, setHiddenContactIds] = useState(new Set());
   const [page, setPage] = useState(0);
@@ -212,6 +216,28 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
   useEffect(() => subscribeGroupLibraryChange((entries) => {
     setGroupLibraryEntries(Array.isArray(entries) ? entries : loadGroupLibraryEntries());
   }), []);
+
+  // Fetch server-side group library
+  useEffect(() => {
+    if (activeTab !== 2) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [catRes, grRes] = await Promise.all([
+          fetch(`${API_BASE}/api/group-library/categories`),
+          fetch(`${API_BASE}/api/group-library/groups${selectedCategory ? `?categoryId=${selectedCategory}` : ''}`),
+        ]);
+        const catData = await catRes.json();
+        const grData = await grRes.json();
+        if (cancelled) return;
+        if (catData.ok) setServerCategories(catData.categories || []);
+        if (grData.ok) setServerLibraryGroups(grData.groups || []);
+      } catch {
+        // fallback to localStorage entries
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, selectedCategory]);
 
   const updateActionState = (patch) => {
     onActionStateChange?.({
@@ -471,15 +497,31 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     })).filter((friend) => !hiddenContactIds.has(String(friend.zid || '').trim())),
   ];
 
+  // Merge server library groups with localStorage entries
+  const mergedLibraryEntries = serverLibraryGroups.length > 0
+    ? serverLibraryGroups.map((g) => ({
+        groupId: String(g.id),
+        name: g.name || '',
+        inviteLink: g.invite_link || '',
+        description: g.description || '',
+        categoryName: g.category_name || '',
+        categoryColor: g.category_color || '',
+        categoryId: g.category_id,
+        memberCount: g.member_count || 0,
+      }))
+    : groupLibraryEntries;
+
   const groupLibraryRows = dedupeRows(
-    groupLibraryEntries
+    mergedLibraryEntries
       .map((group, idx) => ({
         key: group?.groupId || group?.zid || group?.inviteLink || `library_${idx}`,
         rowKey: String(group?.groupId || group?.zid || group?.inviteLink || `library_${idx}`),
         name: group?.name || 'Không rõ tên nhóm',
         avatar: group?.avatar || '',
-        phone: group?.inviteLink || (group?.totalMember ? `${group.totalMember} thành viên` : '—'),
-        classification: group?.description || 'Chưa có mô tả',
+        phone: group?.inviteLink || (group?.totalMember ? `${group.totalMember} thành viên` : (group?.memberCount ? `${group.memberCount} thành viên` : '—')),
+        classification: group?.categoryName || group?.description || 'Chưa có mô tả',
+        categoryName: group?.categoryName || '',
+        categoryColor: group?.categoryColor || '',
         zid: group?.groupId || group?.zid || '—',
         inviteLink: group?.inviteLink || '',
         isHiddenConversation: Boolean(group?.isHiddenConversation),
@@ -547,7 +589,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
     },
     2: {
       title: activeAccount ? 'Chưa có thư viện nhóm' : 'Không có dữ liệu',
-      description: 'Tab này dùng cho dữ liệu nhóm có link mời. Nếu chưa có dữ liệu, cần nạp link nhóm vào thư viện trước khi dùng chức năng tham gia nhóm.',
+      description: 'Tab này hiển thị danh sách nhóm từ thư viện. Quản trị viên có thể thêm nhóm và phân loại theo danh mục trong trang Admin.',
     },
     3: {
       title: activeAccount ? 'Không có SĐT/ZID' : 'Không có dữ liệu',
@@ -977,6 +1019,29 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
         </FormControl>
       )}
 
+      {/* Category filter for Group Library tab */}
+      {activeTab === 2 && serverCategories.length > 0 && !isDrilledIntoMembers && (
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 2 }}>
+          <Chip
+            label="Tất cả"
+            size="small"
+            variant={!selectedCategory ? 'filled' : 'outlined'}
+            color={!selectedCategory ? 'primary' : 'default'}
+            onClick={() => setSelectedCategory('')}
+          />
+          {serverCategories.map((cat) => (
+            <Chip
+              key={cat.id}
+              label={cat.name}
+              size="small"
+              variant={String(selectedCategory) === String(cat.id) ? 'filled' : 'outlined'}
+              sx={String(selectedCategory) === String(cat.id) ? { bgcolor: cat.color, color: '#fff' } : {}}
+              onClick={() => setSelectedCategory(String(selectedCategory) === String(cat.id) ? '' : String(cat.id))}
+            />
+          ))}
+        </Box>
+      )}
+
       {viewState.showAllAccountsFriends && activeTab === 0 && accounts.length > 1 && (
         <Alert severity="info" sx={{ mb: 2, py: 0.5 }} icon={false}>
           Đang hiển thị bạn bè từ <strong>{accounts.length} tài khoản</strong> ({filteredFriendRows.length} bạn bè). Nhãn nick nguồn hiển thị bên cạnh tên.
@@ -1296,9 +1361,13 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
                     </FormControl>
                     </Tooltip>
                   ) : activeTab === 2 ? (
-                    <Typography variant="caption" color="text.secondary">
-                      {row.classification || '—'}
-                    </Typography>
+                    row.categoryName ? (
+                      <Chip label={row.categoryName} size="small" sx={{ bgcolor: row.categoryColor || '#1976d2', color: '#fff', fontSize: '0.7rem', height: 22, fontWeight: 600 }} />
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">
+                        {row.classification || '—'}
+                      </Typography>
+                    )
                   ) : activeTab === 3 ? (
                     row.found === false ? (
                       <Chip label="Không tìm thấy" size="small" color="error" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
