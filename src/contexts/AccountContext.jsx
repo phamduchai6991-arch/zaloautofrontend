@@ -380,17 +380,25 @@ export function AccountProvider({ children }) {
 
   useEffect(() => {
     if (!googleUserId) return;
-    localStorage.setItem(buildAccountsStorageKey(googleUserId), JSON.stringify(accounts.map((account) => ({
-      ...account,
-      cookie: '',
-      cookies: [],
-      imei: '',
-      decryptKey: '',
-      commonParams: '',
-      commonData: null,
-      sessionSource: [],
-      UIN: '',
-    }))));
+    try {
+      localStorage.setItem(buildAccountsStorageKey(googleUserId), JSON.stringify(accounts.map((account) => ({
+        ...account,
+        cookie: '',
+        cookies: [],
+        imei: '',
+        decryptKey: '',
+        commonParams: '',
+        commonData: null,
+        sessionSource: [],
+        UIN: '',
+        friends: [],
+        groups: [],
+        sentFriendRequests: [],
+        receivedFriendRequests: [],
+      }))));
+    } catch (err) {
+      console.warn('[Account] localStorage save failed (quota?):', err?.message);
+    }
   }, [accounts, googleUserId]);
   useEffect(() => {
     if (!googleUserId) return;
