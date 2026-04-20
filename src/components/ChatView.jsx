@@ -28,6 +28,94 @@ function formatMessageTime(ts) {
   }) + ' ' + date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function renderObjectContent(value, depth = 0) {
+  if (depth > 3 || value == null) return '';
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const nested = renderObjectContent(parsed, depth + 1);
+        if (nested) return nested;
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  if (typeof value === 'number') return String(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = renderObjectContent(item, depth + 1);
+      if (nested) return nested;
+    }
+    return '';
+  }
+
+  if (typeof value !== 'object') return '';
+
+  const directCandidates = [
+    value.text,
+    value.content,
+    value.description,
+    value.title,
+    value.name,
+    value.caption,
+    value.body,
+    value.msg,
+    value.message,
+    value.summary,
+    value.snippet,
+    value.href,
+    value.url,
+    value.link,
+  ];
+
+  for (const candidate of directCandidates) {
+    const nested = renderObjectContent(candidate, depth + 1);
+    if (nested) return nested;
+  }
+
+  if (value.fileName || value.file_name) return `[File] ${value.fileName || value.file_name}`;
+  if (value.thumb || value.thumbSrc || value.hdUrl || value.normalUrl || value.imageUrl || value.photoUrl || value.thumbnail || value.image) return '[Hình ảnh]';
+  if (value.videoUrl || value.video) return '[Video]';
+  if (value.audioUrl || value.voiceUrl || value.audio) return '[Âm thanh]';
+  if (value.stickerId) return '[Sticker]';
+
+  const nestedCandidates = [value.data, value.params, value.meta, value.attach, value.attachment, value.attachments, value.payload, value.extra, value.quote];
+  for (const candidate of nestedCandidates) {
+    const nested = renderObjectContent(candidate, depth + 1);
+    if (nested) return nested;
+  }
+
+  return '';
+}
+
+function getMessageDisplayText(message) {
+  if (typeof message?.content === 'string' && message.content.trim()) return message.content.trim();
+
+  const rawContentText = renderObjectContent(message?.rawContent);
+  if (rawContentText) return rawContentText;
+
+  const quoteText = renderObjectContent(message?.quote);
+  if (quoteText) return quoteText;
+
+  const msgType = String(message?.msgType || '').toLowerCase();
+  if (msgType.includes('photo') || msgType.includes('image') || msgType.includes('gif')) return '[Hình ảnh]';
+  if (msgType.includes('video')) return '[Video]';
+  if (msgType.includes('voice') || msgType.includes('audio')) return '[Âm thanh]';
+  if (msgType.includes('sticker')) return '[Sticker]';
+  if (msgType.includes('file')) return '[Tệp đính kèm]';
+  if (msgType.includes('link')) return '[Liên kết]';
+  if (msgType.includes('location')) return '[Vị trí]';
+
+  return '[Tin nhắn không có nội dung]';
+}
+
 function MessageBubble({ message, isSelf }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
@@ -60,7 +148,7 @@ function MessageBubble({ message, isSelf }) {
           }}
         >
           <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-            {message.content || '[Tin nhắn không có nội dung]'}
+            {getMessageDisplayText(message)}
           </Typography>
         </Paper>
         <Typography
