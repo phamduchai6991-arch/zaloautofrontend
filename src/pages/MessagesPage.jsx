@@ -90,6 +90,7 @@ export default function MessagesPage() {
     try {
       const response = await zFetch({
         account: activeAccount,
+        options: { allowCreateTab: false },
         request: {
           method: 'getConversationList',
           args: {},
@@ -114,15 +115,20 @@ export default function MessagesPage() {
     } catch (error) {
       // Keep cached conversations on error — don't wipe existing data
       console.warn('[MessagesPage] refreshConversations error:', error.message);
-      setFeedback({ severity: 'error', message: error.message });
+      const isNoTab = /không tìm thấy tab/i.test(error.message);
+      setFeedback({
+        severity: isNoTab ? 'info' : 'error',
+        message: isNoTab
+          ? 'Hãy mở chat.zalo.me ở một tab khác trong cùng trình duyệt, sau đó bấm "Đồng bộ ngay" để tải hội thoại.'
+          : error.message,
+      });
     } finally {
       setLoading(false);
     }
   }, [activeAccount, activeAccountReady, extensionActive, isActive, planKey, syncState.phase]);
 
-  // Don't auto-refresh on mount — uses cached conversations.
-  // User clicks "Đồng bộ ngay" to fetch fresh data (requires extension → opens Chrome).
-  // useEffect(() => { refreshConversations(); }, [refreshConversations]);
+  // Auto-refresh on mount (uses allowCreateTab:false so won't open new Zalo window)
+  useEffect(() => { refreshConversations(); }, [refreshConversations]);
 
   useEffect(() => {
     if (!extensionActive) return;

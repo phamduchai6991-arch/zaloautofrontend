@@ -146,6 +146,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
 
       const response = await zFetch({
         account,
+        options: { allowCreateTab: false },
         request: {
           method: 'getMessageHistory',
           args: {
@@ -420,10 +421,10 @@ export default function ChatView({ conversation, account, accountReady = false, 
             <CircularProgress size={24} />
           </Box>
         ) : messages.length === 0 ? (
-          <Box sx={{ textAlign: 'center', pt: 4 }}>
+          <Box sx={{ textAlign: 'center', pt: 4, px: 3 }}>
             <Typography variant="body2" color="text.secondary">
               {accountReady
-                ? 'Chưa tải được lịch sử tin nhắn cho hội thoại này.'
+                ? 'Để xem tin nhắn, hãy mở chat.zalo.me ở một tab khác trong cùng trình duyệt rồi quay lại đây.'
                 : 'Tài khoản chưa sẵn sàng để tải lịch sử tin nhắn. Hãy hoàn tất đồng bộ với extension.'}
             </Typography>
           </Box>
