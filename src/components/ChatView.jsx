@@ -21,11 +21,16 @@ const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 function formatMessageTime(ts) {
   if (!ts) return '';
   const date = new Date(ts);
-  return date.toLocaleDateString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }) + ' ' + date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  if (isNaN(date.getTime())) return '';
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+  const time = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return time;
+  if (isYesterday) return `Hôm qua ${time}`;
+  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) + ' ' + time;
 }
 
 function renderObjectContent(value, depth = 0) {
@@ -134,6 +139,60 @@ function getSenderName(message) {
   return message.dName || '';
 }
 
+// --- Extract media/link info from rawContent ---
+function extractMediaInfo(message) {
+  const raw = message?.rawContent;
+  if (!raw || typeof raw !== 'object') {
+    // Check if text content contains a URL
+    const text = message?.content || '';
+    const urlMatch = typeof text === 'string' && text.match(/https?:\/\/[^\s]+/);
+    if (urlMatch) return { type: 'link', url: urlMatch[0] };
+    return null;
+  }
+
+  const src = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
+  if (!src) return null;
+
+  // Image
+  const imgUrl = src.hdUrl || src.normalUrl || src.thumb || src.thumbSrc || src.imageUrl || src.photoUrl || src.thumbnail || src.image;
+  if (imgUrl) return { type: 'image', url: imgUrl, caption: src.caption || src.description || src.title || '' };
+
+  // Sticker
+  if (src.stickerId || src.stickerUrl) return { type: 'sticker', url: src.stickerUrl || src.spriteUrl || '' };
+
+  // File
+  if (src.fileName || src.file_name) return { type: 'file', name: src.fileName || src.file_name, size: src.fileSize || src.file_size || 0 };
+
+  // Video
+  if (src.videoUrl || src.video) return { type: 'video', url: src.videoUrl || src.video, thumb: src.thumb || src.thumbUrl || '' };
+
+  // Link card
+  const href = src.href || src.url || src.link;
+  if (href) return { type: 'link', url: href, title: src.title || src.name || '', desc: src.description || src.desc || '', thumb: src.thumb || src.thumbUrl || src.thumbnail || src.image || '' };
+
+  // Nested: check src.params, src.data, src.attach
+  for (const nested of [src.params, src.data, src.attach, src.attachment]) {
+    if (nested && typeof nested === 'object') {
+      const nestedResult = extractMediaInfo({ rawContent: nested });
+      if (nestedResult) return nestedResult;
+    }
+  }
+
+  return null;
+}
+
+// Render text with inline URLs as clickable links
+function renderTextWithLinks(text) {
+  if (!text || typeof text !== 'string') return text;
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    /^https?:\/\//.test(part)
+      ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>{part}</a>
+      : part
+  );
+}
+
 // Zalo emoticon codes → emoji mapping
 const ZALO_EMOTICONS = {
   '/-strong': '💪', '/-heart': '❤️', ':>': '😊', ':o': '😮', ':-((' : '😢',
@@ -163,51 +222,149 @@ function renderZaloEmoticons(text) {
   return result;
 }
 
-function MessageBubble({ message, isSelf }) {
+function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
   const senderName = getSenderName(message);
+  const media = extractMediaInfo(message);
+  const displayText = getMessageDisplayText(message);
+  const isMediaOnly = media && (media.type === 'image' || media.type === 'sticker');
 
   return (
     <Box
       sx={{
         display: 'flex',
         justifyContent: isSelf ? 'flex-end' : 'flex-start',
-        mb: 1.5,
+        mb: 0.5,
         px: 1,
       }}
     >
       {!isSelf && (
-        <Avatar sx={{ width: 32, height: 32, mr: 1, mt: 0.5, fontSize: 14 }}>
-          {getAvatarLabel(message)}
-        </Avatar>
+        showAvatar ? (
+          <Avatar sx={{ width: 32, height: 32, mr: 1, mt: 0.5, fontSize: 14 }}>
+            {getAvatarLabel(message)}
+          </Avatar>
+        ) : (
+          <Box sx={{ width: 32, mr: 1 }} />
+        )
       )}
       <Box sx={{ maxWidth: '65%' }}>
-        {!isSelf && senderName && (
+        {!isSelf && showName && senderName && (
           <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5, mb: 0.25, display: 'block' }}>
             {senderName}
           </Typography>
         )}
-        <Paper
-          elevation={0}
-          sx={{
-            px: 1.5,
-            py: 1,
-            borderRadius: 2,
-            bgcolor: isFailed ? 'error.light' : isSelf ? 'primary.main' : 'grey.100',
-            color: isFailed ? 'error.contrastText' : isSelf ? 'primary.contrastText' : 'text.primary',
-            opacity: isSending ? 0.7 : 1,
-            wordBreak: 'break-word',
-          }}
-        >
-          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-            {renderZaloEmoticons(getMessageDisplayText(message))}
+
+        {/* Link card rendering */}
+        {media?.type === 'link' && media.title ? (
+          <Paper
+            elevation={0}
+            component="a"
+            href={media.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: 'block',
+              textDecoration: 'none',
+              borderRadius: 2,
+              overflow: 'hidden',
+              bgcolor: 'grey.100',
+              border: '1px solid',
+              borderColor: 'divider',
+              opacity: isSending ? 0.7 : 1,
+              '&:hover': { borderColor: 'primary.main' },
+            }}
+          >
+            {media.thumb && (
+              <Box
+                component="img"
+                src={media.thumb}
+                alt=""
+                onError={(e) => { e.target.style.display = 'none'; }}
+                sx={{ width: '100%', maxHeight: 160, objectFit: 'cover', display: 'block' }}
+              />
+            )}
+            <Box sx={{ px: 1.5, py: 1 }}>
+              <Typography variant="body2" fontWeight={600} color="text.primary" sx={{ mb: 0.25 }}>
+                {media.title}
+              </Typography>
+              {media.desc && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {media.desc}
+                </Typography>
+              )}
+            </Box>
+          </Paper>
+        ) : media?.type === 'image' && media.url ? (
+          /* Image rendering */
+          <Box sx={{ borderRadius: 2, overflow: 'hidden', opacity: isSending ? 0.7 : 1 }}>
+            <Box
+              component="img"
+              src={media.url}
+              alt={media.caption || 'Hình ảnh'}
+              onError={(e) => { e.target.parentElement.innerHTML = '<div style="padding:12px;background:#f5f5f5;border-radius:8px;color:#999">[Hình ảnh]</div>'; }}
+              sx={{ maxWidth: '100%', maxHeight: 300, borderRadius: 2, display: 'block', cursor: 'pointer' }}
+              onClick={() => window.open(media.url, '_blank')}
+            />
+            {media.caption && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block' }}>
+                {media.caption}
+              </Typography>
+            )}
+          </Box>
+        ) : media?.type === 'file' ? (
+          /* File attachment */
+          <Paper
+            elevation={0}
+            sx={{
+              px: 1.5, py: 1, borderRadius: 2,
+              bgcolor: isSelf ? 'primary.main' : 'grey.100',
+              color: isSelf ? 'primary.contrastText' : 'text.primary',
+              display: 'flex', alignItems: 'center', gap: 1,
+              opacity: isSending ? 0.7 : 1,
+            }}
+          >
+            <AttachFileIcon sx={{ fontSize: 18 }} />
+            <Box>
+              <Typography variant="body2" fontWeight={500}>{media.name}</Typography>
+              {media.size > 0 && (
+                <Typography variant="caption" color="inherit" sx={{ opacity: 0.7 }}>
+                  {media.size > 1048576 ? `${(media.size / 1048576).toFixed(1)} MB` : `${Math.round(media.size / 1024)} KB`}
+                </Typography>
+              )}
+            </Box>
+          </Paper>
+        ) : (
+          /* Standard text bubble */
+          <Paper
+            elevation={0}
+            sx={{
+              px: 1.5,
+              py: 0.75,
+              borderRadius: 2,
+              bgcolor: isFailed ? 'error.light' : isSelf ? 'primary.main' : 'grey.100',
+              color: isFailed ? 'error.contrastText' : isSelf ? 'primary.contrastText' : 'text.primary',
+              opacity: isSending ? 0.7 : 1,
+              wordBreak: 'break-word',
+            }}
+          >
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+              {renderTextWithLinks(renderZaloEmoticons(displayText))}
+            </Typography>
+          </Paper>
+        )}
+
+        {/* Link text below card (like competitor) */}
+        {media?.type === 'link' && !media.title && media.url && (
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.25, px: 0.5 }}>
+            <a href={media.url} target="_blank" rel="noopener noreferrer" style={{ color: '#1976d2' }}>{media.url}</a>
           </Typography>
-        </Paper>
+        )}
+
         <Typography
           variant="caption"
           color={isFailed ? 'error.main' : 'text.secondary'}
-          sx={{ display: 'block', mt: 0.25, textAlign: isSelf ? 'right' : 'left', px: 0.5 }}
+          sx={{ display: 'block', mt: 0.25, textAlign: isSelf ? 'right' : 'left', px: 0.5, fontSize: '0.7rem' }}
         >
           {isSending ? 'Đang gửi...' : isFailed ? 'Gửi thất bại' : formatMessageTime(message.ts)}
         </Typography>
@@ -644,11 +801,17 @@ export default function ChatView({ conversation, account, accountReady = false, 
           messages.map((msg, index) => {
             // Zalo convention: "0" means self for uidFrom/idTo
             const isSelf = msg.fromId === selfId || msg.fromId === '0';
+            const prevMsg = index > 0 ? messages[index - 1] : null;
+            const sameSenderAsPrev = prevMsg && prevMsg.fromId === msg.fromId;
+            const closeInTime = prevMsg && Math.abs((msg.ts || 0) - (prevMsg.ts || 0)) < 120000; // 2 min
+            const grouped = sameSenderAsPrev && closeInTime;
             return (
               <MessageBubble
                 key={msg.msgId || `idx_${index}_${msg.ts}`}
                 message={msg}
                 isSelf={isSelf}
+                showAvatar={!grouped}
+                showName={!grouped}
               />
             );
           })
