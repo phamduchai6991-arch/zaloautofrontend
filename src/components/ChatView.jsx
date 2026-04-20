@@ -116,6 +116,14 @@ function getMessageDisplayText(message) {
   return '[Tin nhắn không có nội dung]';
 }
 
+function hasRenderableMessageContent(message) {
+  return getMessageDisplayText(message) !== '[Tin nhắn không có nội dung]';
+}
+
+function hasUsableMessageList(messages) {
+  return Array.isArray(messages) && messages.some(hasRenderableMessageContent);
+}
+
 function MessageBubble({ message, isSelf }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
@@ -175,19 +183,20 @@ function buildMessageSignature(message) {
 }
 
 // --- sessionStorage cache helpers ---
-const MSG_CACHE_PREFIX = 'zt_msgs_';
+const MSG_CACHE_PREFIX = 'zt_msgs_v2_';
 const MSG_CACHE_MAX = 20; // max conversations to cache
 
 function getCachedMessages(convId) {
   if (!convId) return [];
   try {
     const raw = localStorage.getItem(MSG_CACHE_PREFIX + convId);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return hasUsableMessageList(parsed) ? parsed : [];
   } catch { return []; }
 }
 
 function setCachedMessages(convId, messages) {
-  if (!convId || !messages?.length) return;
+  if (!convId || !messages?.length || !hasUsableMessageList(messages)) return;
   try {
     localStorage.setItem(MSG_CACHE_PREFIX + convId, JSON.stringify(messages));
     // Evict oldest caches if too many
@@ -270,6 +279,15 @@ export default function ChatView({ conversation, account, accountReady = false, 
 
       if (response?.ok && Array.isArray(response.data)) {
         const sorted = [...response.data].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        if (sorted.length > 0 && !hasUsableMessageList(sorted)) {
+          console.warn('[ChatView] getMessageHistory returned placeholder-only data for', convId);
+          if (!isPolling) {
+            setMessages([]);
+            setFetchError('Đã nhận được lịch sử nhưng chưa đọc ra nội dung thực. Đang chẩn đoán...');
+            runDiagnosticRef.current?.();
+          }
+          return;
+        }
         setMessages((prev) => {
           // Merge: keep local temp/sending messages, replace server messages
           const tempMessages = prev.filter((m) => String(m.msgId).startsWith('temp_'));
