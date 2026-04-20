@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
+  Button,
   CircularProgress,
   Divider,
   IconButton,
@@ -12,6 +13,7 @@ import {
 import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import GroupIcon from '@mui/icons-material/Group';
+import BugReportIcon from '@mui/icons-material/BugReport';
 import { zFetch, onIncomingMessages } from '../utils/extensionBridge';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
@@ -116,6 +118,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
   const convId = conversation?.id || conversation?.rawId || null;
   const [messages, setMessages] = useState(() => getCachedMessages(convId));
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
@@ -134,6 +137,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     if (!isPolling) {
       conversationIdRef.current = convId;
       setLoading(true);
+      setFetchError(null);
     }
 
     // Don't fetch if conversation changed while we were waiting
@@ -193,14 +197,39 @@ export default function ChatView({ conversation, account, accountReady = false, 
         });
       } else if (!isPolling && response && !response.ok) {
         console.warn('[ChatView] getMessageHistory failed:', response.error);
+        setFetchError(response.error || 'Không lấy được tin nhắn.');
       }
     } catch (err) {
       console.error('[ChatView] fetchMessages error:', err);
-      if (!isPolling) setMessages([]);
+      if (!isPolling) {
+        setMessages([]);
+        setFetchError(err?.message || 'Lỗi không xác định khi tải tin nhắn.');
+      }
     } finally {
       if (!isPolling) setLoading(false);
     }
   }, [conversation, extensionActive, account, accountReady]);
+
+  const [diagResult, setDiagResult] = useState(null);
+  const runDiagnostic = useCallback(async () => {
+    if (!conversation || !extensionActive || !account) return;
+    const convId = conversation.id || conversation.rawId;
+    try {
+      const response = await zFetch({
+        account,
+        options: { allowCreateTab: false },
+        request: {
+          method: 'debugGetMessageHistory',
+          args: { threadId: convId, isGroup: conversation.isGroup, count: 3 },
+        },
+      });
+      console.log('[ChatView] Diagnostic result:', response?.data);
+      setDiagResult(response?.data || { error: 'No data returned' });
+    } catch (err) {
+      console.error('[ChatView] Diagnostic error:', err);
+      setDiagResult({ error: err?.message || String(err) });
+    }
+  }, [conversation, extensionActive, account]);
 
   // Initial load when conversation changes — restore cache only (no auto-fetch via extension)
   useEffect(() => {
@@ -423,10 +452,30 @@ export default function ChatView({ conversation, account, accountReady = false, 
         ) : messages.length === 0 ? (
           <Box sx={{ textAlign: 'center', pt: 4, px: 3 }}>
             <Typography variant="body2" color="text.secondary">
-              {accountReady
-                ? 'Để xem tin nhắn, hãy mở chat.zalo.me ở một tab khác trong cùng trình duyệt rồi quay lại đây.'
-                : 'Tài khoản chưa sẵn sàng để tải lịch sử tin nhắn. Hãy hoàn tất đồng bộ với extension.'}
+              {!accountReady
+                ? 'Tài khoản chưa sẵn sàng để tải lịch sử tin nhắn. Hãy hoàn tất đồng bộ với extension.'
+                : fetchError
+                  ? `Lỗi: ${fetchError}`
+                  : 'Để xem tin nhắn, hãy mở chat.zalo.me ở một tab khác trong cùng trình duyệt rồi quay lại đây.'}
             </Typography>
+            {accountReady && extensionActive && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<BugReportIcon />}
+                onClick={runDiagnostic}
+                sx={{ mt: 2 }}
+              >
+                Chẩn đoán lỗi
+              </Button>
+            )}
+            {diagResult && (
+              <Paper sx={{ mt: 2, p: 1.5, textAlign: 'left', maxHeight: 300, overflow: 'auto' }}>
+                <Typography variant="caption" component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>
+                  {JSON.stringify(diagResult, null, 2)}
+                </Typography>
+              </Paper>
+            )}
           </Box>
         ) : (
           messages.map((msg, index) => {
