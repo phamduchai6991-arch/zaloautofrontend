@@ -806,6 +806,10 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
   }, [campaignState]);
 
   useEffect(() => {
+    if (syncState.phase === 'ready') {
+      setFeedback(null);
+      return;
+    }
     if (!syncState?.error) return;
     if (syncState.phase !== 'failed' && syncState.phase !== 'cancelled') return;
     setFeedback({
