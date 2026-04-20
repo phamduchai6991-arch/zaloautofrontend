@@ -12,6 +12,7 @@ import {
 import {
   EditNote as EditNoteIcon,
   Person as PersonIcon,
+  ChatBubbleOutline as ChatIcon,
   MenuBook as GuideIcon,
   HeadsetMic as SupportIcon,
 } from '@mui/icons-material';
@@ -22,6 +23,7 @@ const DRAWER_WIDTH = 280;
 const mainMenu = [
   { icon: <EditNoteIcon />, label: 'Tương Tác', path: '/reach' },
   { icon: <PersonIcon />, label: 'Tài Khoản Zalo', path: '/accounts' },
+  { icon: <ChatIcon />, label: 'Tin Nhắn', path: '/messages' },
 ];
 
 const bottomMenu = [
