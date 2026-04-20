@@ -124,9 +124,49 @@ function hasUsableMessageList(messages) {
   return Array.isArray(messages) && messages.some(hasRenderableMessageContent);
 }
 
+function getAvatarLabel(message) {
+  if (message.dName) return message.dName[0].toUpperCase();
+  if (message.fromId && !/^[0-9]+$/.test(message.fromId)) return message.fromId[0].toUpperCase();
+  return '?';
+}
+
+function getSenderName(message) {
+  return message.dName || '';
+}
+
+// Zalo emoticon codes → emoji mapping
+const ZALO_EMOTICONS = {
+  '/-strong': '💪', '/-heart': '❤️', ':>': '😊', ':o': '😮', ':-((' : '😢',
+  ':-h': '😎', ':-P': '😛', ':D': '😄', ':-|': '😐', ':-*': '😘',
+  ':-x': '😡', ':-t': '😤', ':-/': '😕', ':-S': '😰', ':-@': '😠',
+  ':-$': '😳', ':-&': '🤢', ':-!': '😬', ':-[': '😦', ':-\\\\': '😖',
+  '>_<': '😣', 'o:)': '😇', 'B-)': '😎', ':-))': '😂', ':-(': '☹️',
+  ':)': '🙂', ';)': '😉', ':P': '😛', ':*': '😘', ':|': '😐',
+  ':(': '☹️', ';(': '😢', '/-rose': '🌹', '/-sun': '☀️',
+  '/-rain': '🌧️', '/-cloud': '☁️', '/-star': '⭐', '/-moon': '🌙',
+  '/-coffee': '☕', '/-beer': '🍺', '/-cake': '🎂', '/-gift': '🎁',
+  '/-music': '🎵', '/-phone': '📱', '/-ok': '👌', '/-v': '✌️',
+  '/-bye': '👋', '/-pray': '🙏', '/-clap': '👏', '/-like': '👍',
+  '/-dislike': '👎', '/-angry': '😡', '/-cry': '😭', '/-laugh': '😆',
+  '/-love': '😍', '/-kiss': '💋', '/-hug': '🤗', '/-think': '🤔',
+  '/-cool': '😎', '/-shock': '😱',
+};
+
+function renderZaloEmoticons(text) {
+  if (!text || typeof text !== 'string') return text;
+  let result = text;
+  for (const [code, emoji] of Object.entries(ZALO_EMOTICONS)) {
+    if (result.includes(code)) {
+      result = result.split(code).join(emoji);
+    }
+  }
+  return result;
+}
+
 function MessageBubble({ message, isSelf }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
+  const senderName = getSenderName(message);
 
   return (
     <Box
@@ -139,10 +179,15 @@ function MessageBubble({ message, isSelf }) {
     >
       {!isSelf && (
         <Avatar sx={{ width: 32, height: 32, mr: 1, mt: 0.5, fontSize: 14 }}>
-          {(message.fromId || '?')[0]}
+          {getAvatarLabel(message)}
         </Avatar>
       )}
       <Box sx={{ maxWidth: '65%' }}>
+        {!isSelf && senderName && (
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5, mb: 0.25, display: 'block' }}>
+            {senderName}
+          </Typography>
+        )}
         <Paper
           elevation={0}
           sx={{
@@ -156,7 +201,7 @@ function MessageBubble({ message, isSelf }) {
           }}
         >
           <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-            {getMessageDisplayText(message)}
+            {renderZaloEmoticons(getMessageDisplayText(message))}
           </Typography>
         </Paper>
         <Typography
