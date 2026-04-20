@@ -127,6 +127,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
 
   const selfId = String(account?.userId || '');
   const conversationIdRef = useRef(convId);
+  const runDiagnosticRef = useRef(null);
 
   const fetchMessages = useCallback(async (isPolling = false) => {
     if (!conversation || !extensionActive || !account || !accountReady) return;
@@ -198,12 +199,19 @@ export default function ChatView({ conversation, account, accountReady = false, 
       } else if (!isPolling && response && !response.ok) {
         console.warn('[ChatView] getMessageHistory failed:', response.error);
         setFetchError(response.error || 'Không lấy được tin nhắn.');
+        // Auto-run diagnostic on failure
+        runDiagnosticRef.current?.();
+      } else if (!isPolling && response?.ok && (!response.data || response.data.length === 0)) {
+        // API succeeded but returned empty — auto-diagnose
+        setFetchError('API trả về 0 tin nhắn. Đang chẩn đoán...');
+        runDiagnosticRef.current?.();
       }
     } catch (err) {
       console.error('[ChatView] fetchMessages error:', err);
       if (!isPolling) {
         setMessages([]);
         setFetchError(err?.message || 'Lỗi không xác định khi tải tin nhắn.');
+        runDiagnosticRef.current?.();
       }
     } finally {
       if (!isPolling) setLoading(false);
@@ -213,6 +221,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
   const [diagResult, setDiagResult] = useState(null);
   const runDiagnostic = useCallback(async () => {
     if (!conversation || !extensionActive || !account) return;
+    if (diagResult) return; // already ran
     const convId = conversation.id || conversation.rawId;
     try {
       const response = await zFetch({
@@ -229,7 +238,8 @@ export default function ChatView({ conversation, account, accountReady = false, 
       console.error('[ChatView] Diagnostic error:', err);
       setDiagResult({ error: err?.message || String(err) });
     }
-  }, [conversation, extensionActive, account]);
+  }, [conversation, extensionActive, account, diagResult]);
+  runDiagnosticRef.current = runDiagnostic;
 
   // Initial load when conversation changes — restore cache only (no auto-fetch via extension)
   useEffect(() => {
@@ -238,6 +248,8 @@ export default function ChatView({ conversation, account, accountReady = false, 
     const cached = getCachedMessages(id);
     setMessages(cached);
     setInputValue('');
+    setFetchError(null);
+    setDiagResult(null);
     // Only fetch from extension if it's already active (tab already exists), don't force new window
     if (id && extensionActive && accountReady) fetchMessages(false);
   }, [fetchMessages, conversation]);
