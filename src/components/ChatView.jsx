@@ -118,11 +118,22 @@ function getMessageDisplayText(message) {
   if (msgType.includes('link')) return '[Liên kết]';
   if (msgType.includes('location')) return '[Vị trí]';
 
-  return '[Tin nhắn không có nội dung]';
+  // Numeric msgType fallback (Zalo internal types)
+  const msgTypeNum = Number(message?.msgType);
+  if (msgTypeNum === 2 || msgTypeNum === 201) return '[Hình ảnh]';
+  if (msgTypeNum === 3) return '[Sticker]';
+  if (msgTypeNum === 4) return '[GIF]';
+  if (msgTypeNum === 6) return '[Video]';
+  if (msgTypeNum === 7) return '[Âm thanh]';
+  if (msgTypeNum === 8) return '[Vị trí]';
+  if (msgTypeNum === 10) return '[Tệp đính kèm]';
+  if (msgTypeNum === 11) return '[Cuộc gọi]';
+
+  return null; // no renderable content
 }
 
 function hasRenderableMessageContent(message) {
-  return getMessageDisplayText(message) !== '[Tin nhắn không có nội dung]';
+  return getMessageDisplayText(message) !== null;
 }
 
 function hasUsableMessageList(messages) {
@@ -349,7 +360,7 @@ function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) 
             }}
           >
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {renderTextWithLinks(renderZaloEmoticons(displayText))}
+              {renderTextWithLinks(renderZaloEmoticons(displayText || ''))}
             </Typography>
           </Paper>
         )}
@@ -491,6 +502,9 @@ export default function ChatView({ conversation, account, accountReady = false, 
           return;
         }
         setMessages((prev) => {
+          // Guard against race condition: user may have switched conversation
+          // between the stale-check above and this state updater executing
+          if (conversationIdRef.current !== convId) return prev;
           // Merge: keep local temp/sending messages, replace server messages
           const tempMessages = prev.filter((m) => String(m.msgId).startsWith('temp_'));
           const serverIds = new Set(sorted.map((m) => m.msgId));
@@ -798,10 +812,10 @@ export default function ChatView({ conversation, account, accountReady = false, 
             )}
           </Box>
         ) : (
-          messages.map((msg, index) => {
+          messages.filter(hasRenderableMessageContent).map((msg, index, arr) => {
             // Zalo convention: "0" means self for uidFrom/idTo
             const isSelf = msg.fromId === selfId || msg.fromId === '0';
-            const prevMsg = index > 0 ? messages[index - 1] : null;
+            const prevMsg = index > 0 ? arr[index - 1] : null;
             const sameSenderAsPrev = prevMsg && prevMsg.fromId === msg.fromId;
             const closeInTime = prevMsg && Math.abs((msg.ts || 0) - (prevMsg.ts || 0)) < 120000; // 2 min
             const grouped = sameSenderAsPrev && closeInTime;
