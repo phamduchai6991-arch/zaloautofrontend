@@ -93,7 +93,7 @@ export default function MessagesPage() {
     try {
       const response = await zFetch({
         account: activeAccount,
-        options: { allowCreateTab: false },
+        options: { allowCreateTab: true },
         request: {
           method: 'getConversationList',
           args: {},
@@ -118,8 +118,11 @@ export default function MessagesPage() {
     } catch (error) {
       // Keep cached conversations on error — don't wipe existing data
       console.warn('[MessagesPage] refreshConversations error:', error.message);
-      const isNoTab = /không tìm thấy tab/i.test(error.message);
-      if (!isNoTab) {
+      // Suppress transient "not ready" errors — they resolve automatically:
+      // - "không tìm thấy tab": no open Zalo tab yet, will retry when account changes
+      // - "chưa có cookie": cookies not yet restored from DB, will retry after enrichment
+      const isSilentError = /không tìm thấy tab|chưa có cookie/i.test(error.message);
+      if (!isSilentError) {
         setFeedback({ severity: 'error', message: error.message });
       }
     } finally {
