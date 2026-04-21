@@ -304,7 +304,9 @@ export function AccountProvider({ children }) {
   const [pingTrigger, setPingTrigger] = useState(0);
 
   useEffect(() => {
-    if (!API_BASE || !activeAccount || !activeAccountReady) {
+    // Skip ping entirely when extension is active — extension manages the session,
+    // backend doesn't have current chrome.storage cookies so it would always false-positive.
+    if (!API_BASE || !activeAccount || !activeAccountReady || extensionActive) {
       setZaloSessionStatus('unknown');
       lastPingAccountIdRef.current = null;
       return;
@@ -339,7 +341,7 @@ export function AccountProvider({ children }) {
     })();
 
     return () => { cancelled = true; };
-  }, [activeAccount?.id, activeAccountReady, pingTrigger]);
+  }, [activeAccount?.id, activeAccountReady, extensionActive, pingTrigger]);
 
   // Allow manual re-check (e.g. after re-sync)
   const recheckZaloSession = useCallback(() => {
