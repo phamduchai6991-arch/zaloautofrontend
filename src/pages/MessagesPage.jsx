@@ -215,10 +215,12 @@ export default function MessagesPage() {
     try { localStorage.setItem('zt_selected_conv', JSON.stringify(conv)); } catch {}
   }, []);
 
-  // Reset selected conversation when account changes
+  // Reset conversations + selected chat when account changes
   useEffect(() => {
     setSelectedConversation(null);
+    setConversations([]);
     localStorage.removeItem('zt_selected_conv');
+    localStorage.removeItem('zt_conversations');
   }, [activeAccount?.id]);
 
   const summary = useMemo(() => ({
