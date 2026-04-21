@@ -69,13 +69,13 @@ export default function MessagesPage() {
       return;
     }
 
-    if (!extensionActive) {
+    if (!extensionActive && !(import.meta.env.VITE_BACKEND_URL)) {
       console.log('[MessagesPage] refreshConversations: extension not active');
       setFeedback({ severity: 'warning', message: 'Extension chưa hoạt động nên chưa đọc được danh sách hội thoại.' });
       return;
     }
 
-    if (!activeAccountReady) {
+    if (!activeAccountReady && !extensionActive) {
       console.log('[MessagesPage] refreshConversations: account not ready');
       setFeedback({
         severity: 'warning',
@@ -88,28 +88,67 @@ export default function MessagesPage() {
 
     setLoading(true);
     setFeedback(null);
-    console.log('[MessagesPage] refreshConversations: fetching via extension...');
+    console.log('[MessagesPage] refreshConversations: fetching...');
 
     try {
-      const response = await zFetch({
-        account: activeAccount,
-        options: { allowCreateTab: true },
-        request: {
-          method: 'getConversationList',
-          args: {},
-        },
-      });
+      let rawList = null;
 
-      console.log('[MessagesPage] zFetch response:', response?.ok, 'data length:', Array.isArray(response?.data) ? response.data.length : typeof response?.data);
-
-      if (!response?.ok) {
-        throw new Error(response?.error || 'Không lấy được danh sách hội thoại từ Zalo.');
+      // Strategy 1: Backend HTTP API — uses cookies from DB, no browser tab needed
+      const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+      if (API_BASE && activeAccount) {
+        try {
+          const res = await fetch(`${API_BASE}/api/zalo/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account: activeAccount }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.ok && json?.data) {
+              rawList = json.data;
+              console.log('[MessagesPage] Loaded conversations from backend:', typeof rawList);
+            }
+          }
+        } catch (backendErr) {
+          console.warn('[MessagesPage] Backend conversations failed:', backendErr.message);
+        }
       }
 
+      // Strategy 2: Extension fallback — reads from open Zalo tab's memory
+      if (rawList === null && extensionActive) {
+        const response = await zFetch({
+          account: activeAccount,
+          options: { allowCreateTab: false },
+          request: { method: 'getConversationList', args: {} },
+        });
+        if (response?.ok) {
+          rawList = response.data;
+          console.log('[MessagesPage] Loaded conversations from extension, count:', Array.isArray(rawList) ? rawList.length : typeof rawList);
+        } else if (response?.error && !/không tìm thấy tab/i.test(response.error)) {
+          throw new Error(response.error);
+        }
+      }
+
+      if (rawList === null) {
+        // No source succeeded yet — keep cached data silently
+        return;
+      }
+
+      // Normalize response — backend may return {msgs: [...], groups:[...]} or flat array
+      let items = [];
+      if (Array.isArray(rawList)) {
+        items = rawList;
+      } else if (rawList && typeof rawList === 'object') {
+        // Backend getrecentv2 returns {msgs:[...], ...} — flatten
+        const msgs = Array.isArray(rawList.msgs) ? rawList.msgs : [];
+        const grps = Array.isArray(rawList.groupMsgs) ? rawList.groupMsgs : [];
+        items = [...msgs, ...grps];
+      }
       const friendMap = buildFriendMap(activeAccount?.friends || []);
       const groupMap = buildGroupMap(activeAccount?.groups || []);
-      const nextConversations = (Array.isArray(response.data) ? response.data : [])
-        .map((conversation) => enrichConversation(conversation, friendMap, groupMap));
+      const nextConversations = items
+        .map((conversation) => enrichConversation(conversation, friendMap, groupMap))
+        .filter(Boolean);
 
       console.log('[MessagesPage] Loaded', nextConversations.length, 'conversations');
       setConversations(nextConversations);
