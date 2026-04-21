@@ -63,7 +63,7 @@ const SECTIONS = [
             '&:hover': { bgcolor: '#dc2626' },
           }}
         >
-          Tải Extension AutoZalo v2.0.0
+          Tải Extension AutoZalo v3.0.0
         </Button>
 
         <Typography variant="subtitle2" gutterBottom>Các bước cài đặt:</Typography>
@@ -421,9 +421,9 @@ export default function GuidePage() {
         Hướng Dẫn Sử Dụng
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        AutoZalo v2.0.0 — Công cụ quản lý Zalo đa tài khoản
+        AutoZalo v3.0.0 — Công cụ quản lý Zalo đa tài khoản
       </Typography>
-      <Chip label="v2.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
+      <Chip label="v3.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
 
       <Stack spacing={1.5}>
         {SECTIONS.map((section) => (
