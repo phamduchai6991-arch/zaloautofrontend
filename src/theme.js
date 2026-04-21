@@ -26,13 +26,20 @@ const theme = createTheme({
     },
     subtitle1: {
       fontWeight: 600,
+      fontSize: '1rem',
     },
     subtitle2: {
       fontWeight: 600,
-      fontSize: '0.875rem',
+      fontSize: '0.9375rem',
+    },
+    body1: {
+      fontSize: '0.9375rem',
     },
     body2: {
       fontSize: '0.875rem',
+    },
+    caption: {
+      fontSize: '0.8125rem',
     },
   },
   shape: {

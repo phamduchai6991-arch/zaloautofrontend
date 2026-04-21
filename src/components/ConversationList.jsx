@@ -71,7 +71,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
           flex: 1,
           overflow: 'auto',
           py: 0,
-          '& .MuiListItemButton-root': { px: 1.5, py: 1 },
+          '& .MuiListItemButton-root': { px: 1.5, py: 1.25 },
         }}
       >
         {loading ? (
@@ -99,7 +99,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
                 bgcolor: isActive ? 'action.selected' : 'transparent',
               }}
             >
-              <ListItemAvatar sx={{ minWidth: 48 }}>
+              <ListItemAvatar sx={{ minWidth: 54 }}>
                 <Badge
                   badgeContent={conversation.unreadCount || 0}
                   color="primary"
@@ -108,7 +108,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
                 >
                   <Avatar
                     src={conversation.avatar}
-                    sx={{ width: 40, height: 40 }}
+                    sx={{ width: 46, height: 46 }}
                   >
                     {(conversation.displayName || 'Z')[0]}
                   </Avatar>
@@ -117,7 +117,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
               <ListItemText
                 primary={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="body2" fontWeight={conversation.unreadCount ? 700 : 400} noWrap sx={{ flex: 1 }}>
+                    <Typography variant="body1" fontWeight={conversation.unreadCount ? 700 : 500} noWrap sx={{ flex: 1 }}>
                       {conversation.displayName || 'Không rõ tên'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
@@ -128,7 +128,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
                 secondary={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                     <Typography
-                      variant="caption"
+                      variant="body2"
                       color={conversation.unreadCount ? 'text.primary' : 'text.secondary'}
                       fontWeight={conversation.unreadCount ? 600 : 400}
                       noWrap

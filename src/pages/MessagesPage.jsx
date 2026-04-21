@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Avatar,
   Box,
   Button,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Typography,
 } from '@mui/material';
@@ -21,9 +24,9 @@ import ChatView from '../components/ChatView';
 
 function SummaryCard({ label, value }) {
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, minWidth: 120, textAlign: 'center' }}>
-      <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="h6" fontWeight={700}>{value}</Typography>
+    <Paper variant="outlined" sx={{ px: 2, py: 1.25, minWidth: 110, textAlign: 'center', borderRadius: 2 }}>
+      <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+      <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.3 }}>{value}</Typography>
     </Paper>
   );
 }
@@ -33,7 +36,7 @@ function isExtensionInvalidationError(value) {
 }
 
 export default function MessagesPage() {
-  const { activeAccount, activeAccountReady, extensionActive, syncState } = useAccount();
+  const { activeAccount, activeAccountReady, extensionActive, syncState, accounts, activeAccountIndex, setActiveAccountIndex } = useAccount();
   const { isActive, planKey } = useSubscription();
   const [conversations, setConversations] = useState(() => {
     try {
@@ -116,12 +119,9 @@ export default function MessagesPage() {
       // Keep cached conversations on error — don't wipe existing data
       console.warn('[MessagesPage] refreshConversations error:', error.message);
       const isNoTab = /không tìm thấy tab/i.test(error.message);
-      setFeedback({
-        severity: isNoTab ? 'info' : 'error',
-        message: isNoTab
-          ? 'Hãy mở chat.zalo.me ở một tab khác trong cùng trình duyệt, sau đó bấm "Đồng bộ ngay" để tải hội thoại.'
-          : error.message,
-      });
+      if (!isNoTab) {
+        setFeedback({ severity: 'error', message: error.message });
+      }
     } finally {
       setLoading(false);
     }
@@ -238,6 +238,38 @@ export default function MessagesPage() {
           <SummaryCard label="Cá nhân" value={summary.direct} />
           <SummaryCard label="Nhóm" value={summary.groups} />
           <Box sx={{ flex: 1 }} />
+          {/* Account switcher */}
+          {accounts.length > 0 && (
+            <Select
+              size="small"
+              value={activeAccountIndex >= 0 ? activeAccountIndex : 0}
+              onChange={(e) => setActiveAccountIndex(Number(e.target.value))}
+              sx={{ height: 36, minWidth: 160, fontSize: '0.875rem' }}
+              renderValue={(value) => {
+                const acc = accounts[Number(value)];
+                if (!acc) return 'Chọn tài khoản';
+                const label = acc.name && acc.name !== 'Tài khoản Zalo' ? acc.name : acc.phone || `ZID ${acc.userId}`;
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Avatar src={acc.avatar} sx={{ width: 22, height: 22, fontSize: 10 }}>{(acc.name || 'Z')[0]}</Avatar>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{label}</span>
+                  </Box>
+                );
+              }}
+            >
+              {accounts.map((acc, idx) => {
+                const label = acc.name && acc.name !== 'Tài khoản Zalo' ? acc.name : acc.phone || `ZID ${acc.userId}`;
+                return (
+                  <MenuItem key={acc.id || idx} value={idx}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Avatar src={acc.avatar} sx={{ width: 28, height: 28, fontSize: 12 }}>{(acc.name || 'Z')[0]}</Avatar>
+                      <Typography variant="body2">{label}</Typography>
+                    </Box>
+                  </MenuItem>
+                );
+              })}
+            </Select>
+          )}
           <Button
             variant="outlined"
             size="small"
@@ -263,9 +295,9 @@ export default function MessagesPage() {
           variant="outlined"
           square
           sx={{
-            width: 360,
-            minWidth: 280,
-            maxWidth: 420,
+            width: 380,
+            minWidth: 300,
+            maxWidth: 440,
             borderTop: 0,
             borderBottom: 0,
             borderLeft: 0,

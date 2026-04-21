@@ -252,16 +252,16 @@ function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) 
     >
       {!isSelf && (
         showAvatar ? (
-          <Avatar sx={{ width: 32, height: 32, mr: 1, mt: 0.5, fontSize: 14 }}>
+          <Avatar sx={{ width: 36, height: 36, mr: 1, mt: 0.5, fontSize: 15 }}>
             {getAvatarLabel(message)}
           </Avatar>
         ) : (
-          <Box sx={{ width: 32, mr: 1 }} />
+          <Box sx={{ width: 36, mr: 1 }} />
         )
       )}
       <Box sx={{ maxWidth: '65%' }}>
         {!isSelf && showName && senderName && (
-          <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5, mb: 0.25, display: 'block' }}>
+          <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ ml: 0.5, mb: 0.25, display: 'block' }}>
             {senderName}
           </Typography>
         )}
@@ -350,8 +350,8 @@ function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) 
           <Paper
             elevation={0}
             sx={{
-              px: 1.5,
-              py: 0.75,
+              px: 1.75,
+              py: 1,
               borderRadius: 2,
               bgcolor: isFailed ? 'error.light' : isSelf ? 'primary.main' : 'grey.100',
               color: isFailed ? 'error.contrastText' : isSelf ? 'primary.contrastText' : 'text.primary',
@@ -359,7 +359,7 @@ function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) 
               wordBreak: 'break-word',
             }}
           >
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
               {renderTextWithLinks(renderZaloEmoticons(displayText || ''))}
             </Typography>
           </Paper>
@@ -758,12 +758,12 @@ export default function ChatView({ conversation, account, accountReady = false, 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
-      <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Avatar src={conversation.avatar} sx={{ width: 40, height: 40 }}>
+      <Box sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: 'background.paper' }}>
+        <Avatar src={conversation.avatar} sx={{ width: 44, height: 44 }}>
           {(conversation.displayName || 'Z')[0]}
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" fontWeight={600} noWrap>
+          <Typography variant="subtitle1" fontWeight={700} noWrap>
             {conversation.displayName || 'Không rõ tên'}
           </Typography>
           {conversation.isGroup && conversation.memberCount > 0 && (
