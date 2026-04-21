@@ -343,6 +343,46 @@ export function AccountProvider({ children }) {
     return () => { cancelled = true; };
   }, [activeAccount?.id, activeAccountReady, extensionActive, pingTrigger]);
 
+  // ─── Auto-enrich account session from DB when switching to an account that
+  //     has no cookies/imei in memory (e.g. after page reload or first visit).
+  const enrichSessionRef = useRef({});
+  useEffect(() => {
+    if (!API_BASE || !googleUserId || !activeAccount) return;
+    if (hasStoredSession(activeAccount)) return; // already has session in memory
+    if (activeAccount.syncStatus !== 'ready') return; // not synced yet, skip
+
+    const accountId = activeAccount.id;
+    if (enrichSessionRef.current[accountId]) return; // already tried for this account
+    enrichSessionRef.current[accountId] = true;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = getAuthHeaders();
+        const res = await fetch(
+          `${API_BASE}/api/accounts?userId=${encodeURIComponent(googleUserId)}`,
+          { cache: 'no-store', headers },
+        );
+        if (cancelled || !res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data.ok || !Array.isArray(data.accounts)) return;
+        const fresh = data.accounts.find(
+          (a) => (a.id || a.zaloId || a.userId) === accountId,
+        );
+        if (!fresh || !hasStoredSession(normalizeAccountRecord(fresh))) return;
+        // Restore session into the accounts state
+        const patch = normalizeAccountRecord({ ...fresh, ownerUserId: googleUserId });
+        setAccounts((prev) => prev.map((a) =>
+          a.id === accountId ? { ...a, ...patch } : a,
+        ));
+        console.log('[Account] Auto-enriched session for', accountId, 'from DB.');
+      } catch (_) { /* silent */ }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAccount?.id, activeAccount?.syncStatus, googleUserId]);
+
   // Allow manual re-check (e.g. after re-sync)
   const recheckZaloSession = useCallback(() => {
     lastPingAccountIdRef.current = null;
@@ -808,7 +848,11 @@ export function AccountProvider({ children }) {
 
   const refreshAccountViaBackend = useCallback(async () => {
     const acct = activeAccountIndex >= 0 ? accounts[activeAccountIndex] : null;
-    if (!acct || !hasStoredSession(acct)) return null;
+    // Note: deliberately NOT checking hasStoredSession here — the backend
+    // already has DB-enrichment logic that loads cookies from DB when the
+    // frontend doesn't have them in-memory. Blocking here causes a false
+    // "no session" error when the account is valid but cookies aren't in RAM.
+    if (!acct || !acct.id) return null;
 
     const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
     if (!API_BASE) return null;
