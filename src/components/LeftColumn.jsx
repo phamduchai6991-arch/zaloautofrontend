@@ -1728,31 +1728,37 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
               addAccountUsage(accountId, 'messages', accepted);
             }
           } else if (res.status > 0) {
-            // Backend reachable but returned error — don't fallback to extension
-            backendOk = true;
             let errorMsg = `Server lỗi (${res.status}).`;
+            let isSessionError = false;
             try {
               const errData = await res.json();
               if (errData?.error) errorMsg = errData.error;
               if (errData?.code === 'SERVICE_LOGIN_FAILED') {
-                errorMsg = 'Phiên Zalo đã hết hạn. Hãy đồng bộ lại tài khoản rồi thử lại.';
+                // Session/cookie issue — let extension fallback handle it
+                isSessionError = true;
               }
             } catch { /* ignore */ }
 
-            onCampaignCommit?.({
-              messageJobs: messageRecords.map((job) => ({
-                ...job,
-                status: 'failed',
-                statusLabel: 'Server lỗi',
-                error: errorMsg,
-                provider: 'server',
-              })),
-            });
-
-            messageSummary = {
-              severity: 'error',
-              message: errorMsg,
-            };
+            if (isSessionError) {
+              // Don't set backendOk so the extension fallback can take over.
+              // If extension also fails it will call onCampaignCommit with its error.
+            } else {
+              // Other backend errors (rate limit, validation, etc.) — don't fallback
+              backendOk = true;
+              onCampaignCommit?.({
+                messageJobs: messageRecords.map((job) => ({
+                  ...job,
+                  status: 'failed',
+                  statusLabel: 'Server lỗi',
+                  error: errorMsg,
+                  provider: 'server',
+                })),
+              });
+              messageSummary = {
+                severity: 'error',
+                message: errorMsg,
+              };
+            }
           }
         } catch (_) {
           // Backend unreachable — fall through to extension

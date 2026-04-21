@@ -682,7 +682,10 @@ export default function ChatView({ conversation, account, accountReady = false, 
               }
             }
             if (lastResult?.ok) sent = true;
-            else if (lastResult?.error) throw new Error(lastResult.error);
+            else if (lastResult?.error && lastResult?.code !== 'SERVICE_LOGIN_FAILED') {
+              // Re-throw non-session errors; session errors fall through to extension
+              throw new Error(lastResult.error);
+            }
           }
         } catch (backendErr) {
           if (sent) throw backendErr;
