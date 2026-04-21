@@ -884,7 +884,17 @@ export function AccountProvider({ children }) {
 
     updateAccountById(acct.id, patch);
     if (googleUserId) {
-      await persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
+      // Only persist to server if we have a full session (cookies) in memory.
+      // If acct has no cookies, the DB already has them — sending without cookies
+      // would risk overwriting DB session_blob. The SQL is also patched to guard
+      // against this, but we add a second layer of defence here.
+      if (hasStoredSession(acct)) {
+        await persistAccountToServer(googleUserId, { ...acct, ...patch }, getAuthHeaders());
+      } else {
+        // Still persist non-session fields (name, avatar, friends, groups) by sending
+        // only the patch without the empty-cookie acct session fields.
+        await persistAccountToServer(googleUserId, { ...patch, id: acct.id, ownerUserId: acct.ownerUserId, userId: acct.userId, zaloId: acct.zaloId }, getAuthHeaders());
+      }
     }
     if (patch.friends.length) setFriends(patch.friends);
     if (patch.groups.length) setGroups(patch.groups);
