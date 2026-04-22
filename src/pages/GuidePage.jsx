@@ -38,7 +38,10 @@ const DEFAULT_GUIDE_VIDEO_URL = 'https://www.youtube.com/watch?v=ysz5S6PUM-U';
 
 function toYoutubeEmbedUrl(rawUrl) {
   try {
-    const url = new URL(String(rawUrl || '').trim());
+    const text = String(rawUrl || '').trim();
+    const iframeMatch = text.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    const candidate = iframeMatch?.[1] ? iframeMatch[1].trim() : text;
+    const url = new URL(candidate);
     const host = url.hostname.toLowerCase();
 
     if (host.includes('youtu.be')) {
@@ -439,8 +442,7 @@ const SECTIONS = [
 export default function GuidePage() {
   const [expanded, setExpanded] = useState('install');
   const [manualGuide, setManualGuide] = useState({
-    content: '',
-    videoUrls: [],
+    videoEmbedUrl: '',
     updatedAt: '',
   });
 
@@ -454,8 +456,7 @@ export default function GuidePage() {
         if (!active || !data?.ok) return;
         const guide = data.guide || {};
         setManualGuide({
-          content: String(guide.content || ''),
-          videoUrls: Array.isArray(guide.videoUrls) ? guide.videoUrls : [],
+          videoEmbedUrl: String(guide.videoEmbedUrl || ''),
           updatedAt: String(guide.updatedAt || ''),
         });
       })
@@ -466,14 +467,10 @@ export default function GuidePage() {
     };
   }, []);
 
-  const embedVideos = useMemo(
-    () => (Array.isArray(manualGuide.videoUrls) ? manualGuide.videoUrls.map((url) => ({ raw: url, embed: toYoutubeEmbedUrl(url) })).filter((item) => item.embed) : []),
-    [manualGuide.videoUrls],
-  );
-
-  const visibleVideos = embedVideos.length > 0
-    ? embedVideos
-    : [{ raw: DEFAULT_GUIDE_VIDEO_URL, embed: toYoutubeEmbedUrl(DEFAULT_GUIDE_VIDEO_URL) }].filter((item) => item.embed);
+  const visibleVideo = useMemo(() => {
+    const embed = toYoutubeEmbedUrl(manualGuide.videoEmbedUrl || DEFAULT_GUIDE_VIDEO_URL);
+    return embed ? { raw: manualGuide.videoEmbedUrl || DEFAULT_GUIDE_VIDEO_URL, embed } : null;
+  }, [manualGuide.videoEmbedUrl]);
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto', py: 4, px: 3 }}>
@@ -485,41 +482,32 @@ export default function GuidePage() {
       </Typography>
       <Chip label="v3.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
 
-      {(manualGuide.content.trim() || visibleVideos.length > 0) && (
+      {visibleVideo && (
         <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.25 }}>
             Hướng dẫn cập nhật từ quản trị viên
           </Typography>
-          {manualGuide.content.trim() && (
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, mb: embedVideos.length > 0 ? 2 : 0 }}>
-              {manualGuide.content}
+          <Stack spacing={1.5}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+              Video hướng dẫn sử dụng web
             </Typography>
-          )}
-          {visibleVideos.length > 0 && (
-            <Stack spacing={1.5}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                Video hướng dẫn sử dụng web
+            <Box sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+              <Box
+                component="iframe"
+                src={visibleVideo.embed}
+                title="guide_video"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allowFullScreen
+                sx={{ width: '100%', height: { xs: 220, md: 360 }, border: 0 }}
+              />
+            </Box>
+            {!manualGuide.videoEmbedUrl && (
+              <Typography variant="caption" color="text.secondary">
+                Đây là link demo. Admin có thể thay link này trong trang quản trị.
               </Typography>
-              {visibleVideos.map((video, index) => (
-                <Box key={`guide_video_${index}`} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
-                  <Box
-                    component="iframe"
-                    src={video.embed}
-                    title={`guide_video_${index}`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    allowFullScreen
-                    sx={{ width: '100%', height: { xs: 220, md: 360 }, border: 0 }}
-                  />
-                </Box>
-              ))}
-              {embedVideos.length === 0 && (
-                <Typography variant="caption" color="text.secondary">
-                  Đây là link demo. Admin có thể thay link này trong trang quản trị.
-                </Typography>
-              )}
-            </Stack>
-          )}
+            )}
+          </Stack>
           {manualGuide.updatedAt && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
               Cập nhật lần cuối: {new Date(manualGuide.updatedAt).toLocaleString('vi-VN')}

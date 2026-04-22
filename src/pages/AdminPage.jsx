@@ -91,15 +91,15 @@ function fmtDateTime(iso) {
 }
 
 function parseVideoInput(text) {
-  return String(text || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return String(text || '').trim();
 }
 
 function toYoutubeEmbedUrl(rawUrl) {
   try {
-    const url = new URL(String(rawUrl || '').trim());
+    const text = String(rawUrl || '').trim();
+    const iframeMatch = text.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    const candidate = iframeMatch?.[1] ? iframeMatch[1].trim() : text;
+    const url = new URL(candidate);
     const host = url.hostname.toLowerCase();
 
     if (host.includes('youtu.be')) {
@@ -166,8 +166,7 @@ export default function AdminPage() {
   const [editingGroup, setEditingGroup] = useState(null);
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideSaving, setGuideSaving] = useState(false);
-  const [guideText, setGuideText] = useState('');
-  const [guideVideoInput, setGuideVideoInput] = useState('');
+  const [guideVideoValue, setGuideVideoValue] = useState('');
   const [guideUpdatedAt, setGuideUpdatedAt] = useState('');
 
   const adminFetch = useCallback(
@@ -223,9 +222,7 @@ export default function AdminPage() {
       try {
         const data = await adminFetch('/api/admin/guide-content', currentToken);
         const guide = data?.guide || {};
-        const videoUrls = Array.isArray(guide.videoUrls) ? guide.videoUrls : [];
-        setGuideText(String(guide.content || ''));
-        setGuideVideoInput(videoUrls.join('\n'));
+        setGuideVideoValue(String(guide.videoEmbedUrl || ''));
         setGuideUpdatedAt(String(guide.updatedAt || ''));
       } finally {
         setGuideLoading(false);
@@ -279,8 +276,7 @@ export default function AdminPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          content: guideText,
-          videoUrls: parseVideoInput(guideVideoInput),
+          videoEmbedUrl: parseVideoInput(guideVideoValue),
         }),
       });
       const data = await res.json();
@@ -288,9 +284,7 @@ export default function AdminPage() {
         throw new Error(data?.error || 'Không lưu được nội dung hướng dẫn.');
       }
       const updatedGuide = data?.guide || {};
-      const urls = Array.isArray(updatedGuide.videoUrls) ? updatedGuide.videoUrls : [];
-      setGuideText(String(updatedGuide.content || ''));
-      setGuideVideoInput(urls.join('\n'));
+      setGuideVideoValue(String(updatedGuide.videoEmbedUrl || ''));
       setGuideUpdatedAt(String(updatedGuide.updatedAt || ''));
       setSuccessMessage('Đã lưu nội dung Hướng Dẫn Sử Dụng thành công.');
     } catch (e) {
@@ -1006,55 +1000,40 @@ export default function AdminPage() {
           ) : (
             <Stack spacing={2}>
               <Typography variant="subtitle1" fontWeight={700}>
-                Chỉnh sửa thủ công nội dung trang Hướng Dẫn Sử Dụng
+                Chỉnh sửa video trang Hướng Dẫn Sử Dụng
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Nội dung này sẽ hiển thị lên đầu trang Hướng Dẫn Sử Dụng cho toàn bộ người dùng.
+                Chỉ cần thay link nhúng YouTube hoặc dán nguyên đoạn iframe YouTube vào ô bên dưới.
               </Typography>
 
               <TextField
-                label="Nội dung hướng dẫn"
-                multiline
-                minRows={10}
-                maxRows={24}
-                fullWidth
-                value={guideText}
-                onChange={(e) => setGuideText(e.target.value)}
-                placeholder="Nhập hướng dẫn chi tiết..."
-              />
-
-              <TextField
-                label="Video YouTube (mỗi dòng 1 link)"
+                label="Link nhúng video YouTube"
                 multiline
                 minRows={4}
-                maxRows={10}
+                maxRows={8}
                 fullWidth
-                value={guideVideoInput}
-                onChange={(e) => setGuideVideoInput(e.target.value)}
-                helperText="Chỉ cần thay link demo bằng link YouTube thật của bạn, mỗi dòng 1 link."
-                placeholder={GUIDE_VIDEO_DEMO_URL}
+                value={guideVideoValue}
+                onChange={(e) => setGuideVideoValue(e.target.value)}
+                helperText="Dán link YouTube hoặc iframe embed. Chỉ có 1 trường duy nhất này."
+                placeholder={`<iframe width="560" height="315" src="https://www.youtube.com/embed/VnxUJ-6x0Vw?si=cPj3FfnJChkVE5kT" title="YouTube video player"></iframe>`}
               />
 
-              {parseVideoInput(guideVideoInput).length > 0 && (
+              {parseVideoInput(guideVideoValue) && (
                 <Stack spacing={1}>
                   <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                     <VideoIcon fontSize="small" /> Xem trước video embed
                   </Typography>
-                  {parseVideoInput(guideVideoInput).slice(0, 3).map((url, idx) => {
-                    const embed = toYoutubeEmbedUrl(url);
+                  {(() => {
+                    const embed = toYoutubeEmbedUrl(guideVideoValue);
                     if (!embed) {
-                      return (
-                        <Alert key={`invalid_${idx}`} severity="warning">
-                          Link không hợp lệ hoặc không phải YouTube: {url}
-                        </Alert>
-                      );
+                      return <Alert severity="warning">Link hoặc iframe YouTube chưa hợp lệ.</Alert>;
                     }
                     return (
-                      <Box key={`embed_${idx}`} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                      <Box sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
                         <Box
                           component="iframe"
                           src={embed}
-                          title={`guide_video_preview_${idx}`}
+                          title="guide_video_preview"
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                           referrerPolicy="strict-origin-when-cross-origin"
                           allowFullScreen
@@ -1062,7 +1041,7 @@ export default function AdminPage() {
                         />
                       </Box>
                     );
-                  })}
+                  })()}
                 </Stack>
               )}
 
