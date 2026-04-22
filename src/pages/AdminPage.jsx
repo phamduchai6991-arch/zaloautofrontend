@@ -51,6 +51,7 @@ import { notifySubscriptionChanged } from '../contexts/SubscriptionContext';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 const ADMIN_TOKEN_KEY = 'autozalo_admin_token';
+const GUIDE_VIDEO_DEMO_URL = 'https://www.youtube.com/watch?v=ysz5S6PUM-U';
 
 const PLAN_LABELS = { basic: 'Basic', plus: 'Plus', pro: 'Pro' };
 const PLAN_COLORS = { basic: 'info', plus: 'primary', pro: 'secondary' };
@@ -1030,7 +1031,8 @@ export default function AdminPage() {
                 fullWidth
                 value={guideVideoInput}
                 onChange={(e) => setGuideVideoInput(e.target.value)}
-                placeholder={'https://www.youtube.com/watch?v=...\\nhttps://youtu.be/...'}
+                helperText="Chỉ cần thay link demo bằng link YouTube thật của bạn, mỗi dòng 1 link."
+                placeholder={GUIDE_VIDEO_DEMO_URL}
               />
 
               {parseVideoInput(guideVideoInput).length > 0 && (

@@ -34,6 +34,7 @@ import {
 } from '@mui/icons-material';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+const DEFAULT_GUIDE_VIDEO_URL = 'https://www.youtube.com/watch?v=ysz5S6PUM-U';
 
 function toYoutubeEmbedUrl(rawUrl) {
   try {
@@ -470,6 +471,10 @@ export default function GuidePage() {
     [manualGuide.videoUrls],
   );
 
+  const visibleVideos = embedVideos.length > 0
+    ? embedVideos
+    : [{ raw: DEFAULT_GUIDE_VIDEO_URL, embed: toYoutubeEmbedUrl(DEFAULT_GUIDE_VIDEO_URL) }].filter((item) => item.embed);
+
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto', py: 4, px: 3 }}>
       <Typography variant="h4" sx={{ fontWeight: 800, mb: 0.5 }}>
@@ -480,7 +485,7 @@ export default function GuidePage() {
       </Typography>
       <Chip label="v3.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
 
-      {(manualGuide.content.trim() || embedVideos.length > 0) && (
+      {(manualGuide.content.trim() || visibleVideos.length > 0) && (
         <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.25 }}>
             Hướng dẫn cập nhật từ quản trị viên
@@ -490,9 +495,12 @@ export default function GuidePage() {
               {manualGuide.content}
             </Typography>
           )}
-          {embedVideos.length > 0 && (
+          {visibleVideos.length > 0 && (
             <Stack spacing={1.5}>
-              {embedVideos.map((video, index) => (
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Video hướng dẫn sử dụng web
+              </Typography>
+              {visibleVideos.map((video, index) => (
                 <Box key={`guide_video_${index}`} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
                   <Box
                     component="iframe"
@@ -505,6 +513,11 @@ export default function GuidePage() {
                   />
                 </Box>
               ))}
+              {embedVideos.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  Đây là link demo. Admin có thể thay link này trong trang quản trị.
+                </Typography>
+              )}
             </Stack>
           )}
           {manualGuide.updatedAt && (
