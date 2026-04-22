@@ -34,7 +34,7 @@ import {
 } from '@mui/icons-material';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
-const DEFAULT_GUIDE_VIDEO_URL = 'https://www.youtube.com/watch?v=ysz5S6PUM-U';
+const DEFAULT_GUIDE_VIDEO_URL = 'https://www.youtube.com/embed/ysz5S6PUM-U';
 
 function toYoutubeEmbedUrl(rawUrl) {
   try {
@@ -42,17 +42,27 @@ function toYoutubeEmbedUrl(rawUrl) {
     const iframeMatch = text.match(/<iframe[^>]+src=["']([^"']+)["']/i);
     const candidate = iframeMatch?.[1] ? iframeMatch[1].trim() : text;
     const url = new URL(candidate);
-    const host = url.hostname.toLowerCase();
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const path = url.pathname;
 
-    if (host.includes('youtu.be')) {
-      const id = url.pathname.replace('/', '').trim();
-      return id ? `https://www.youtube.com/embed/${id}` : '';
+    const buildEmbed = (id) => {
+      const videoId = String(id || '').trim();
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
+    };
+
+    if (host === 'youtu.be') {
+      const id = path.split('/').filter(Boolean)[0] || '';
+      return buildEmbed(id);
     }
 
-    if (host.includes('youtube.com')) {
-      if (url.pathname.startsWith('/embed/')) return url.toString();
-      const videoId = url.searchParams.get('v');
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
+    if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
+      const watchId = url.searchParams.get('v');
+      if (watchId) return buildEmbed(watchId);
+
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length >= 2 && ['embed', 'shorts', 'live'].includes(segments[0])) {
+        return buildEmbed(segments[1]);
+      }
     }
   } catch {
     return '';
