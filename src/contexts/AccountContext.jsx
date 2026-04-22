@@ -866,6 +866,11 @@ export function AccountProvider({ children }) {
 
       const result = await res.json();
       if (!result?.ok || !result.data) {
+        // If the session has expired on the server side, mark the account as no longer ready
+        // so the UI badge ("Sẵn sàng") is removed until the user re-syncs.
+        if (result?.code === 'SERVICE_LOGIN_FAILED') {
+          updateAccountById(acct.id, { syncStatus: 'idle' });
+        }
         throw new Error(result?.error || 'Backend không thể đồng bộ tài khoản.');
       }
 
