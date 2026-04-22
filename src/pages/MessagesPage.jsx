@@ -22,6 +22,8 @@ import {
 import ConversationList from '../components/ConversationList';
 import ChatView from '../components/ChatView';
 
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+
 function SummaryCard({ label, value }) {
   return (
     <Paper variant="outlined" sx={{ px: 2, py: 1.25, minWidth: 110, textAlign: 'center', borderRadius: 2 }}>
@@ -54,6 +56,7 @@ export default function MessagesPage() {
   });
 
   const refreshConversations = useCallback(async () => {
+    const hasBackend = Boolean(API_BASE);
     if (!isActive) {
       setFeedback({ severity: 'warning', message: 'Gói của bạn không còn hiệu lực. Vui lòng gia hạn để đọc và quản lý hội thoại.' });
       return;
@@ -69,13 +72,13 @@ export default function MessagesPage() {
       return;
     }
 
-    if (!extensionActive && !(import.meta.env.VITE_BACKEND_URL)) {
+    if (!extensionActive && !hasBackend) {
       console.log('[MessagesPage] refreshConversations: extension not active');
       setFeedback({ severity: 'warning', message: 'Extension chưa hoạt động nên chưa đọc được danh sách hội thoại.' });
       return;
     }
 
-    if (!activeAccountReady && !extensionActive) {
+    if (!activeAccountReady && !extensionActive && !hasBackend) {
       console.log('[MessagesPage] refreshConversations: account not ready');
       setFeedback({
         severity: 'warning',
@@ -94,8 +97,7 @@ export default function MessagesPage() {
       let rawList = null;
 
       // Strategy 1: Backend HTTP API — uses cookies from DB, no browser tab needed
-      const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
-      if (API_BASE && activeAccount) {
+      if (hasBackend && activeAccount) {
         try {
           const res = await fetch(`${API_BASE}/api/zalo/conversations`, {
             method: 'POST',
@@ -115,7 +117,8 @@ export default function MessagesPage() {
       }
 
       // Strategy 2: Extension fallback — reads from open Zalo tab's memory
-      if (rawList === null && extensionActive) {
+      const shouldTryExtension = rawList === null || (Array.isArray(rawList) && rawList.length === 0);
+      if (shouldTryExtension && extensionActive) {
         const response = await zFetch({
           account: activeAccount,
           options: { allowCreateTab: false },
@@ -246,7 +249,9 @@ export default function MessagesPage() {
 
   // Poll conversation list every 15 seconds
   useEffect(() => {
-    if (!activeAccount || !activeAccountReady || !extensionActive) return;
+    if (!activeAccount) return;
+    if (!extensionActive && !API_BASE) return;
+    if (!activeAccountReady && !API_BASE) return;
     const intervalId = setInterval(refreshConversations, 15000);
     return () => clearInterval(intervalId);
   }, [activeAccount, activeAccountReady, extensionActive, refreshConversations]);
@@ -319,7 +324,7 @@ export default function MessagesPage() {
             size="small"
             startIcon={<SyncIcon />}
             onClick={refreshConversations}
-            disabled={loading || !activeAccount || !activeAccountReady || !extensionActive}
+            disabled={loading || !activeAccount || (!extensionActive && !API_BASE) || (!activeAccountReady && !API_BASE)}
           >
             {loading ? 'Đang tải...' : 'Đồng bộ ngay'}
           </Button>
