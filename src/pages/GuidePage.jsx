@@ -478,8 +478,13 @@ export default function GuidePage() {
   }, []);
 
   const visibleVideo = useMemo(() => {
-    const embed = toYoutubeEmbedUrl(manualGuide.videoEmbedUrl || DEFAULT_GUIDE_VIDEO_URL);
-    return embed ? { raw: manualGuide.videoEmbedUrl || DEFAULT_GUIDE_VIDEO_URL, embed } : null;
+    const adminEmbed = toYoutubeEmbedUrl(manualGuide.videoEmbedUrl);
+    if (adminEmbed) {
+      return { raw: manualGuide.videoEmbedUrl, embed: adminEmbed };
+    }
+
+    const demoEmbed = toYoutubeEmbedUrl(DEFAULT_GUIDE_VIDEO_URL);
+    return demoEmbed ? { raw: DEFAULT_GUIDE_VIDEO_URL, embed: demoEmbed } : null;
   }, [manualGuide.videoEmbedUrl]);
 
   return (
