@@ -504,8 +504,8 @@ export default function ChatView({ conversation, account, accountReady = false, 
       if (shouldTryExtension && extensionActive) {
         const extResponse = await zFetch({
           account,
-          // Let extension auto-create a minimized action tab to load history.
-          options: { allowCreateTab: true },
+          // Non-intrusive mode: only use existing Zalo tabs, do not auto-create.
+          options: { allowCreateTab: false },
           request: {
             method: 'getMessageHistory',
             args: {
@@ -599,7 +599,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     try {
       const response = await zFetch({
         account,
-        options: { allowCreateTab: true },
+        options: { allowCreateTab: false },
         request: {
           method: 'debugGetMessageHistory',
           args: { threadId: convId, isGroup: conversation.isGroup, count: 3 },
@@ -749,6 +749,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
       if (!sent && extensionActive) {
         const response = await zFetch({
           account,
+          options: { allowCreateTab: false },
           request: {
             method: 'sendZText',
             args: {
@@ -844,7 +845,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
                 ? 'Tài khoản chưa sẵn sàng để tải lịch sử tin nhắn. Hãy hoàn tất đồng bộ với extension.'
                 : fetchError
                   ? `Lỗi: ${fetchError}`
-                    : 'Đang chuẩn bị phiên đọc tin nhắn nhóm. Nếu chưa thấy nội dung, bấm Đồng bộ ngay hoặc chờ vài giây.'}
+                    : 'Chưa có dữ liệu tin nhắn. Hãy đảm bảo có tab chat.zalo.me đang mở đúng tài khoản, hoặc dùng backend đã đồng bộ phiên đầy đủ.'}
             </Typography>
             {accountReady && extensionActive && (
               <Button
