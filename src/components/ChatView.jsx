@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
-  Button,
   CircularProgress,
   Divider,
   IconButton,
@@ -12,7 +11,9 @@ import {
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import CloseIcon from '@mui/icons-material/Close';
 import GroupIcon from '@mui/icons-material/Group';
+import { resolveGroupInviteTargetsViaBackend } from '../utils/localZaloService';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 
@@ -153,6 +154,214 @@ function buildConversationPreviewMessage(conversation) {
   };
 }
 
+function firstNonEmptyText(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function normalizeEntityId(value, isGroup = false) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (isGroup && text.toLowerCase().startsWith('g')) {
+    return text.slice(1);
+  }
+  return text;
+}
+
+function isImageFileLike(value) {
+  const type = String(value?.type || value?.mimeType || '').toLowerCase();
+  const name = String(value?.name || value?.fileName || '').toLowerCase();
+  return type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+}
+
+function formatFileSize(size) {
+  const bytes = Number(size || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+function addSenderProfile(map, rawProfile = {}, options = {}) {
+  if (!rawProfile || typeof rawProfile !== 'object') return;
+
+  const isGroup = Boolean(options.isGroup);
+  const name = firstNonEmptyText(
+    rawProfile.name,
+    rawProfile.displayName,
+    rawProfile.dName,
+    rawProfile.senderName,
+    rawProfile.fromName,
+    rawProfile.zaloName,
+    rawProfile.fullName,
+  );
+  const avatar = firstNonEmptyText(
+    rawProfile.avatar,
+    rawProfile.avatarUrl,
+    rawProfile.avt,
+    rawProfile.photo,
+    rawProfile.thumbSrc,
+    rawProfile.profilePic,
+  );
+
+  const keys = [
+    normalizeEntityId(rawProfile.id, isGroup),
+    normalizeEntityId(rawProfile.userId, isGroup),
+    normalizeEntityId(rawProfile.uid, isGroup),
+    normalizeEntityId(rawProfile.uidFrom, isGroup),
+    normalizeEntityId(rawProfile.fromId, isGroup),
+    normalizeEntityId(rawProfile.senderId, isGroup),
+    normalizeEntityId(rawProfile.zid, isGroup),
+    normalizeEntityId(rawProfile.memberId, isGroup),
+    normalizeEntityId(rawProfile.globalId, isGroup),
+    normalizeEntityId(rawProfile.username, isGroup),
+  ].filter(Boolean);
+
+  if (!keys.length || (!name && !avatar)) return;
+
+  for (const key of keys) {
+    const current = map.get(key);
+    map.set(key, {
+      name: firstNonEmptyText(current?.name, name),
+      avatar: firstNonEmptyText(current?.avatar, avatar),
+    });
+  }
+}
+
+function collectProfilesFromValue(map, value, depth = 0) {
+  if (!value || depth > 3) return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectProfilesFromValue(map, item, depth + 1));
+    return;
+  }
+
+  if (typeof value !== 'object') return;
+
+  addSenderProfile(map, value);
+
+  const nestedCandidates = [
+    value.members,
+    value.memberList,
+    value.memberInfo,
+    value.memberMap,
+    value.currentMems,
+    value.participants,
+    value.participantInfo,
+    value.profiles,
+    value.profile,
+    value.data,
+    value.extra,
+    value.rawContent,
+  ];
+
+  nestedCandidates.forEach((candidate) => collectProfilesFromValue(map, candidate, depth + 1));
+
+  if (!Array.isArray(value) && depth < 2) {
+    Object.values(value).forEach((candidate) => {
+      if (candidate && typeof candidate === 'object') {
+        collectProfilesFromValue(map, candidate, depth + 1);
+      }
+    });
+  }
+}
+
+function buildBaseSenderProfiles(account, conversation) {
+  const map = new Map();
+
+  addSenderProfile(map, {
+    id: account?.userId || account?.id || account?.zaloId,
+    name: account?.name || account?.displayName || account?.zaloName,
+    avatar: account?.avatar || account?.zaloAvatar,
+  });
+
+  (Array.isArray(account?.friends) ? account.friends : []).forEach((friend) => {
+    addSenderProfile(map, friend);
+  });
+
+  const activeGroupId = normalizeEntityId(conversation?.id || conversation?.rawId, true);
+  const matchedGroup = (Array.isArray(account?.groups) ? account.groups : []).find((group) => {
+    const groupId = normalizeEntityId(group?.userId || group?.groupId || group?.id, true);
+    return groupId && groupId === activeGroupId;
+  });
+
+  collectProfilesFromValue(map, matchedGroup);
+  collectProfilesFromValue(map, conversation);
+  return map;
+}
+
+function extractSenderProfile(message) {
+  const map = new Map();
+  collectProfilesFromValue(map, message?.rawContent);
+  const normalizedFromId = normalizeEntityId(message?.fromId);
+  return normalizedFromId ? map.get(normalizedFromId) || null : null;
+}
+
+function enrichMessageForDisplay(message, senderProfiles, selfProfile, selfId) {
+  if (!message || typeof message !== 'object') return message;
+
+  const isSelf = normalizeEntityId(message.fromId) === normalizeEntityId(selfId) || String(message.fromId || '') === '0';
+  const normalizedFromId = normalizeEntityId(message.fromId);
+  const matchedProfile = normalizedFromId ? senderProfiles.get(normalizedFromId) : null;
+  const rawProfile = extractSenderProfile(message);
+
+  const dName = firstNonEmptyText(
+    message.dName,
+    matchedProfile?.name,
+    rawProfile?.name,
+    isSelf ? selfProfile?.name : '',
+  );
+  const avatar = firstNonEmptyText(
+    message.avatar,
+    matchedProfile?.avatar,
+    rawProfile?.avatar,
+    isSelf ? selfProfile?.avatar : '',
+  );
+
+  if (dName === message.dName && avatar === message.avatar) return message;
+  return { ...message, dName, avatar };
+}
+
+function mergeSelectedFiles(existingFiles, incomingFiles) {
+  const merged = [...(Array.isArray(existingFiles) ? existingFiles : [])];
+  const seen = new Set(merged.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+
+  for (const file of Array.isArray(incomingFiles) ? incomingFiles : []) {
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(file);
+  }
+
+  return merged;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const base64 = result.includes(',') ? result.split(',').pop() : result;
+      if (!base64) {
+        reject(new Error(`Không thể đọc tệp ${file.name}.`));
+        return;
+      }
+      resolve({
+        name: file.name,
+        data: base64,
+        type: file.type || 'application/octet-stream',
+        size: file.size || 0,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Không thể đọc tệp ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
 function getAvatarLabel(message) {
   if (message.dName) return message.dName[0].toUpperCase();
   if (message.fromId && !/^[0-9]+$/.test(message.fromId)) return message.fromId[0].toUpperCase();
@@ -176,6 +385,27 @@ function extractMediaInfo(message) {
 
   const src = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
   if (!src) return null;
+
+  const attachments = Array.isArray(src.attachments)
+    ? src.attachments
+    : (Array.isArray(src.attachment?.attachments) ? src.attachment.attachments : []);
+  if (attachments.length > 0) {
+    const firstAttachment = attachments[0];
+    if (isImageFileLike(firstAttachment)) {
+      return {
+        type: 'image',
+        url: firstAttachment.url || firstAttachment.previewUrl || firstAttachment.normalUrl || '',
+        caption: attachments.length > 1 ? `+${attachments.length - 1} tệp khác` : '',
+      };
+    }
+    return {
+      type: 'file',
+      name: attachments.length > 1
+        ? `${firstAttachment.name || firstAttachment.fileName || 'Tệp đính kèm'} (+${attachments.length - 1})`
+        : (firstAttachment.name || firstAttachment.fileName || 'Tệp đính kèm'),
+      size: firstAttachment.size || firstAttachment.fileSize || 0,
+    };
+  }
 
   // Image
   const imgUrl = src.hdUrl || src.normalUrl || src.thumb || src.thumbSrc || src.imageUrl || src.photoUrl || src.thumbnail || src.image;
@@ -265,7 +495,7 @@ function MessageBubble({ message, isSelf, showAvatar = true, showName = true }) 
     >
       {!isSelf && (
         showAvatar ? (
-          <Avatar sx={{ width: 36, height: 36, mr: 1, mt: 0.5, fontSize: 15 }}>
+          <Avatar src={message.avatar || ''} sx={{ width: 36, height: 36, mr: 1, mt: 0.5, fontSize: 15 }}>
             {getAvatarLabel(message)}
           </Avatar>
         ) : (
@@ -443,13 +673,82 @@ export default function ChatView({ conversation, account, accountReady = false, 
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const [inputValue, setInputValue] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [sending, setSending] = useState(false);
+  const [groupMemberProfiles, setGroupMemberProfiles] = useState({});
   const messagesEndRef = useRef(null);
   const shouldAutoScroll = useRef(true);
   const messagesContainerRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const selfId = String(account?.userId || '');
+  const selfId = String(account?.userId || account?.id || account?.zaloId || '');
   const conversationIdRef = useRef(convId);
+
+  const selfProfile = useMemo(() => ({
+    name: firstNonEmptyText(account?.name, account?.displayName, account?.zaloName),
+    avatar: firstNonEmptyText(account?.avatar, account?.zaloAvatar),
+  }), [account]);
+
+  const senderProfiles = useMemo(() => {
+    const map = buildBaseSenderProfiles(account, conversation);
+    Object.entries(groupMemberProfiles || {}).forEach(([key, value]) => {
+      const normalizedKey = normalizeEntityId(key);
+      if (!normalizedKey) return;
+      const current = map.get(normalizedKey);
+      map.set(normalizedKey, {
+        name: firstNonEmptyText(current?.name, value?.name),
+        avatar: firstNonEmptyText(current?.avatar, value?.avatar),
+      });
+    });
+    return map;
+  }, [account, conversation, groupMemberProfiles]);
+
+  const displayMessages = useMemo(
+    () => messages.map((message) => enrichMessageForDisplay(message, senderProfiles, selfProfile, selfId)),
+    [messages, senderProfiles, selfProfile, selfId],
+  );
+
+  useEffect(() => {
+    setGroupMemberProfiles({});
+    if (!conversation?.isGroup || !account || !accountReady) return undefined;
+
+    const groupId = normalizeEntityId(conversation.id || conversation.rawId, true);
+    if (!groupId) return undefined;
+
+    let cancelled = false;
+
+    resolveGroupInviteTargetsViaBackend({
+      account,
+      groups: [{
+        groupId,
+        zid: groupId,
+        name: conversation.displayName || 'Nhóm',
+      }],
+      includeAllMembers: true,
+    })
+      .then((response) => {
+        if (cancelled) return;
+        const membersByGroup = response?.data?.membersByGroup || response?.membersByGroup || {};
+        const rows = Array.isArray(membersByGroup[groupId]) ? membersByGroup[groupId] : [];
+        const nextProfiles = {};
+        rows.forEach((member) => {
+          const memberId = normalizeEntityId(member?.zid || member?.userId || member?.id);
+          if (!memberId) return;
+          nextProfiles[memberId] = {
+            name: firstNonEmptyText(member?.name, member?.displayName),
+            avatar: firstNonEmptyText(member?.avatar),
+          };
+        });
+        setGroupMemberProfiles(nextProfiles);
+      })
+      .catch(() => {
+        if (!cancelled) setGroupMemberProfiles({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account, accountReady, conversation?.displayName, conversation?.id, conversation?.isGroup, conversation?.rawId]);
 
   const fetchMessages = useCallback(async (isPolling = false) => {
     if (!conversation || !account || !accountReady) return;
@@ -584,6 +883,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     const cached = getCachedMessages(id);
     setMessages(cached);
     setInputValue('');
+    setSelectedFiles([]);
     setFetchError(null);
     if (id && accountReady && Boolean(API_BASE)) fetchMessages(false);
   }, [fetchMessages, conversation]);
@@ -615,26 +915,54 @@ export default function ChatView({ conversation, account, accountReady = false, 
     if (shouldAutoScroll.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [displayMessages]);
+
+  const handleAttachFiles = useCallback((event) => {
+    const pickedFiles = Array.from(event.target.files || []);
+    if (pickedFiles.length > 0) {
+      setSelectedFiles((prev) => mergeSelectedFiles(prev, pickedFiles));
+    }
+    event.target.value = '';
+  }, []);
+
+  const handleRemoveFile = useCallback((indexToRemove) => {
+    setSelectedFiles((prev) => prev.filter((_, index) => index !== indexToRemove));
+  }, []);
 
   const handleSend = useCallback(async () => {
     const text = inputValue.trim();
-    if (!text || sending || !conversation || !accountReady) return;
+    const filesToSend = selectedFiles;
+    if ((!text && filesToSend.length === 0) || sending || !conversation || !accountReady) return;
 
     setSending(true);
+    const tempMsgId = `temp_${Date.now()}`;
     const tempMsg = {
-      msgId: `temp_${Date.now()}`,
+      msgId: tempMsgId,
       fromId: selfId,
       content: text,
       ts: Date.now(),
-      msgType: 'text',
+      msgType: filesToSend.length > 0 ? (isImageFileLike(filesToSend[0]) ? 'image' : 'file') : 'text',
+      rawContent: filesToSend.length > 0 ? {
+        attachments: filesToSend.map((file) => ({
+          name: file.name,
+          fileName: file.name,
+          size: file.size,
+          fileSize: file.size,
+          type: file.type,
+          mimeType: file.type,
+        })),
+      } : null,
+      dName: selfProfile.name,
+      avatar: selfProfile.avatar,
       status: 'sending',
     };
     setMessages((prev) => [...prev, tempMsg]);
     setInputValue('');
+    setSelectedFiles([]);
 
     try {
       let sent = false;
+      const filePayloads = await Promise.all(filesToSend.map((file) => fileToBase64(file)));
 
       // Strategy 1: Backend API (zalo-api-final)
       if (API_BASE && account) {
@@ -651,6 +979,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
                 content: text,
                 sourceTab: conversation.isGroup ? 'group' : 'friend',
               }],
+              files: filePayloads,
             }),
           });
           if (res.ok) {
@@ -691,8 +1020,10 @@ export default function ChatView({ conversation, account, accountReady = false, 
           m.msgId === tempMsg.msgId ? { ...m, status: 'sent' } : m
         )
       );
+      fetchMessages(true);
     } catch (error) {
       console.error('[ChatView] Send failed:', error);
+      setSelectedFiles((prev) => mergeSelectedFiles(prev, filesToSend));
       setMessages((prev) =>
         prev.map((m) =>
           m.msgId === tempMsg.msgId
@@ -703,7 +1034,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     } finally {
       setSending(false);
     }
-  }, [inputValue, sending, conversation, selfId, account, accountReady]);
+  }, [account, accountReady, conversation, fetchMessages, inputValue, selectedFiles, selfId, selfProfile, sending]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -766,9 +1097,9 @@ export default function ChatView({ conversation, account, accountReady = false, 
             </Typography>
           </Box>
         ) : (
-          messages.filter(hasRenderableMessageContent).map((msg, index, arr) => {
+          displayMessages.filter(hasRenderableMessageContent).map((msg, index, arr) => {
             // Zalo convention: "0" means self for uidFrom/idTo
-            const isSelf = msg.fromId === selfId || msg.fromId === '0';
+            const isSelf = normalizeEntityId(msg.fromId) === normalizeEntityId(selfId) || msg.fromId === '0';
             const prevMsg = index > 0 ? arr[index - 1] : null;
             const sameSenderAsPrev = prevMsg && prevMsg.fromId === msg.fromId;
             const closeInTime = prevMsg && Math.abs((msg.ts || 0) - (prevMsg.ts || 0)) < 120000; // 2 min
@@ -789,8 +1120,45 @@ export default function ChatView({ conversation, account, accountReady = false, 
 
       {/* Input area */}
       <Divider />
-      <Box sx={{ p: 1.5, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
-        <IconButton size="small" disabled>
+      <Box sx={{ p: 1.5 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={handleAttachFiles}
+        />
+        {selectedFiles.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+            {selectedFiles.map((file, index) => (
+              <Paper
+                key={`${file.name}_${file.size}_${file.lastModified}_${index}`}
+                variant="outlined"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.75,
+                  pl: 1.25,
+                  pr: 0.5,
+                  py: 0.5,
+                  borderRadius: 2,
+                  maxWidth: 260,
+                }}
+              >
+                <AttachFileIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" noWrap>{file.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{formatFileSize(file.size)}</Typography>
+                </Box>
+                <IconButton size="small" onClick={() => handleRemoveFile(index)} disabled={sending}>
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Paper>
+            ))}
+          </Box>
+        )}
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+        <IconButton size="small" onClick={() => fileInputRef.current?.click()} disabled={sending || !accountReady}>
           <AttachFileIcon />
         </IconButton>
         <Paper
@@ -819,10 +1187,11 @@ export default function ChatView({ conversation, account, accountReady = false, 
         <IconButton
           color="primary"
           onClick={handleSend}
-          disabled={!inputValue.trim() || sending || !accountReady}
+          disabled={(!inputValue.trim() && selectedFiles.length === 0) || sending || !accountReady}
         >
           <SendIcon />
         </IconButton>
+        </Box>
       </Box>
     </Box>
   );
