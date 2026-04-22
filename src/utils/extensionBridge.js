@@ -234,7 +234,7 @@ export function cancelAccountSync(requestId, reason = '') {
 }
 
 export function executeMessageJobs(payload) {
-  return requestExtension('EXECUTE_MESSAGE_JOBS', payload, 15000);
+  return requestExtension('EXECUTE_MESSAGE_JOBS', { ...payload, options: { allowCreateTab: false } }, 15000);
 }
 
 export function getZaloCommonData(payload) {

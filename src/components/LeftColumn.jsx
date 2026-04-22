@@ -875,7 +875,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
       }
       setFeedback({
         severity: 'warning',
-        message: 'Không thể đồng bộ — tài khoản chưa có session Zalo. Hãy mở Zalo trên trình duyệt và nhấn "Đồng bộ tài khoản" để lấy cookie mới.',
+        message: 'Không thể đồng bộ — chưa có tài khoản nào được chọn hoặc chưa cấu hình backend.',
       });
     } catch (error) {
       setFeedback({

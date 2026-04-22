@@ -40,7 +40,7 @@ export default function AccountsPage() {
       }
       setFeedback({
         severity: 'warning',
-        message: 'Không thể đồng bộ — tài khoản chưa có session. Hãy xóa và thêm lại.',
+        message: 'Không thể đồng bộ — chưa có tài khoản nào được chọn hoặc chưa cấu hình backend.',
       });
     } catch (error) {
       setFeedback({

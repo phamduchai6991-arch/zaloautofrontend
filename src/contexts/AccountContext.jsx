@@ -904,7 +904,7 @@ export function AccountProvider({ children }) {
     return patch;
     } catch (err) {
       console.warn('[AccountContext] refreshAccountViaBackend failed:', err?.message || err);
-      return null;
+      throw err;
     }
   }, [accounts, activeAccountIndex, getAuthHeaders, googleUserId, updateAccountById]);
 
