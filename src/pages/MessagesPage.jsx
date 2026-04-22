@@ -37,6 +37,60 @@ function isExtensionInvalidationError(value) {
   return /extension context invalidated|tai lai trang sau khi reload extension/i.test(String(value || ''));
 }
 
+function hasMeaningfulPreview(conversation) {
+  const preview = String(conversation?.lastMessage || '').trim();
+  return Boolean(preview && preview !== 'Chưa có tin nhắn' && preview !== '[Tin nhắn không có nội dung]');
+}
+
+function getConversationKey(conversation) {
+  return String(conversation?.id || conversation?.rawId || '').trim();
+}
+
+function mergeConversationSnapshots(prevList, nextList) {
+  const prevMap = new Map();
+  for (const item of Array.isArray(prevList) ? prevList : []) {
+    const key = getConversationKey(item);
+    if (key) prevMap.set(key, item);
+  }
+
+  return (Array.isArray(nextList) ? nextList : []).map((item) => {
+    const key = getConversationKey(item);
+    const prev = key ? prevMap.get(key) : null;
+    if (!prev) return item;
+
+    const nextPreview = String(item?.lastMessage || '').trim();
+    const hasNextPreview = hasMeaningfulPreview(item);
+    const fallbackPreview = String(prev?.lastMessage || '').trim();
+    const fallbackTime = Number(prev?.lastMsgTime || 0);
+
+    return {
+      ...item,
+      lastMessage: hasNextPreview ? nextPreview : (fallbackPreview || item?.lastMessage || ''),
+      lastMsgTime: Number(item?.lastMsgTime || 0) > 0 ? Number(item.lastMsgTime) : fallbackTime,
+      unreadCount: Number(item?.unreadCount || 0) > 0 ? Number(item.unreadCount) : Number(prev?.unreadCount || 0),
+    };
+  });
+}
+
+function isLikelyPartialSnapshot(prevList, nextList) {
+  const prev = Array.isArray(prevList) ? prevList : [];
+  const next = Array.isArray(nextList) ? nextList : [];
+  if (prev.length < 15 || next.length === 0) return false;
+
+  if (next.length < Math.max(6, Math.floor(prev.length * 0.4))) {
+    return true;
+  }
+
+  const prevGroups = prev.filter((item) => item?.isGroup).length;
+  const prevDirect = prev.length - prevGroups;
+  const nextGroups = next.filter((item) => item?.isGroup).length;
+  const nextDirect = next.length - nextGroups;
+
+  const prevHasMixedTypes = prevGroups > 0 && prevDirect > 0;
+  const nextOnlyOneType = nextGroups === 0 || nextDirect === 0;
+  return prevHasMixedTypes && nextOnlyOneType && next.length < Math.floor(prev.length * 0.85);
+}
+
 export default function MessagesPage() {
   const { activeAccount, activeAccountReady, extensionActive, syncState, accounts, activeAccountIndex, setActiveAccountIndex } = useAccount();
   const { isActive, planKey } = useSubscription();
@@ -55,7 +109,7 @@ export default function MessagesPage() {
     } catch { return null; }
   });
 
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = useCallback(async ({ silent = false } = {}) => {
     const hasBackend = Boolean(API_BASE);
     if (!isActive) {
       setFeedback({ severity: 'warning', message: 'Gói của bạn không còn hiệu lực. Vui lòng gia hạn để đọc và quản lý hội thoại.' });
@@ -89,47 +143,62 @@ export default function MessagesPage() {
       return;
     }
 
-    setLoading(true);
-    setFeedback(null);
+    if (!silent) setLoading(true);
+    if (!silent) setFeedback(null);
     console.log('[MessagesPage] refreshConversations: fetching...');
 
     try {
       let rawList = null;
+      let source = 'none';
 
-      // Strategy 1: Backend HTTP API — uses cookies from DB, no browser tab needed
-      if (hasBackend && activeAccount) {
+      const fetchFromBackend = async () => {
+        if (!hasBackend || !activeAccount) return null;
         try {
           const res = await fetch(`${API_BASE}/api/zalo/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ account: activeAccount }),
           });
-          if (res.ok) {
-            const json = await res.json();
-            if (json?.ok && json?.data) {
-              rawList = json.data;
-              console.log('[MessagesPage] Loaded conversations from backend:', typeof rawList);
-            }
+          if (!res.ok) return null;
+          const json = await res.json();
+          if (json?.ok && json?.data) {
+            console.log('[MessagesPage] Loaded conversations from backend:', typeof json.data);
+            source = 'backend';
+            return json.data;
           }
+          return null;
         } catch (backendErr) {
           console.warn('[MessagesPage] Backend conversations failed:', backendErr.message);
+          return null;
         }
-      }
+      };
 
-      // Strategy 2: Extension fallback — reads from open Zalo tab's memory
-      const shouldTryExtension = rawList === null || (Array.isArray(rawList) && rawList.length === 0);
-      if (shouldTryExtension && extensionActive) {
+      const fetchFromExtension = async () => {
+        if (!extensionActive) return null;
         const response = await zFetch({
           account: activeAccount,
           options: { allowCreateTab: false },
           request: { method: 'getConversationList', args: {} },
         });
         if (response?.ok) {
-          rawList = response.data;
-          console.log('[MessagesPage] Loaded conversations from extension, count:', Array.isArray(rawList) ? rawList.length : typeof rawList);
-        } else if (response?.error && !/không tìm thấy tab/i.test(response.error)) {
+          source = 'extension';
+          console.log('[MessagesPage] Loaded conversations from extension, count:', Array.isArray(response.data) ? response.data.length : typeof response.data);
+          return response.data;
+        }
+        if (response?.error && !/không tìm thấy tab/i.test(response.error)) {
           throw new Error(response.error);
         }
+        return null;
+      };
+
+      // Prefer extension for richer, realtime metadata. Backend is fallback when extension is unavailable/empty.
+      if (extensionActive) {
+        rawList = await fetchFromExtension();
+        if (!Array.isArray(rawList) || rawList.length === 0) {
+          rawList = await fetchFromBackend();
+        }
+      } else {
+        rawList = await fetchFromBackend();
       }
 
       if (rawList === null) {
@@ -153,9 +222,19 @@ export default function MessagesPage() {
         .map((conversation) => enrichConversation(conversation, friendMap, groupMap))
         .filter(Boolean);
 
-      console.log('[MessagesPage] Loaded', nextConversations.length, 'conversations');
-      setConversations(nextConversations);
-      try { localStorage.setItem('zt_conversations', JSON.stringify(nextConversations)); } catch {}
+      console.log('[MessagesPage] Loaded', nextConversations.length, 'conversations from', source);
+      setConversations((prev) => {
+        const merged = mergeConversationSnapshots(prev, nextConversations)
+          .sort((a, b) => Number(b?.lastMsgTime || 0) - Number(a?.lastMsgTime || 0));
+
+        if (silent && isLikelyPartialSnapshot(prev, merged)) {
+          console.warn('[MessagesPage] Ignore partial conversation snapshot during background refresh.');
+          return prev;
+        }
+
+        try { localStorage.setItem('zt_conversations', JSON.stringify(merged)); } catch {}
+        return merged;
+      });
       setFeedback(null);
     } catch (error) {
       // Keep cached conversations on error — don't wipe existing data
@@ -164,16 +243,16 @@ export default function MessagesPage() {
       // - "không tìm thấy tab": no open Zalo tab yet, will retry when account changes
       // - "chưa có cookie": cookies not yet restored from DB, will retry after enrichment
       const isSilentError = /không tìm thấy tab|chưa có cookie/i.test(error.message);
-      if (!isSilentError) {
+      if (!isSilentError && !silent) {
         setFeedback({ severity: 'error', message: error.message });
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [activeAccount, activeAccountReady, extensionActive, isActive, planKey, syncState.phase]);
 
   // Auto-refresh on mount (uses allowCreateTab:false so won't open new Zalo window)
-  useEffect(() => { refreshConversations(); }, [refreshConversations]);
+  useEffect(() => { refreshConversations({ silent: false }); }, [refreshConversations]);
 
   useEffect(() => {
     if (!extensionActive) return;
@@ -247,12 +326,12 @@ export default function MessagesPage() {
     });
   }, [activeAccount, activeAccountReady, extensionActive, selectedConversation?.id]);
 
-  // Poll conversation list every 15 seconds
+  // Poll conversation list in background without toggling loading UI.
   useEffect(() => {
     if (!activeAccount) return;
     if (!extensionActive && !API_BASE) return;
     if (!activeAccountReady && !API_BASE) return;
-    const intervalId = setInterval(refreshConversations, 15000);
+    const intervalId = setInterval(() => refreshConversations({ silent: true }), 30000);
     return () => clearInterval(intervalId);
   }, [activeAccount, activeAccountReady, extensionActive, refreshConversations]);
 
@@ -323,7 +402,7 @@ export default function MessagesPage() {
             variant="outlined"
             size="small"
             startIcon={<SyncIcon />}
-            onClick={refreshConversations}
+            onClick={() => refreshConversations({ silent: false })}
             disabled={loading || !activeAccount || (!extensionActive && !API_BASE) || (!activeAccountReady && !API_BASE)}
           >
             {loading ? 'Đang tải...' : 'Đồng bộ ngay'}
