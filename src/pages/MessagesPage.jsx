@@ -37,6 +37,10 @@ function isExtensionInvalidationError(value) {
   return /extension context invalidated|tai lai trang sau khi reload extension/i.test(String(value || ''));
 }
 
+function keepGroupConversations(items) {
+  return (Array.isArray(items) ? items : []).filter((item) => Boolean(item?.isGroup));
+}
+
 function hasMeaningfulPreview(conversation) {
   const preview = String(conversation?.lastMessage || '').trim();
   return Boolean(preview && preview !== 'Chưa có tin nhắn' && preview !== '[Tin nhắn không có nội dung]');
@@ -97,7 +101,7 @@ export default function MessagesPage() {
   const [conversations, setConversations] = useState(() => {
     try {
       const raw = localStorage.getItem('zt_conversations');
-      return raw ? JSON.parse(raw) : [];
+      return keepGroupConversations(raw ? JSON.parse(raw) : []);
     } catch { return []; }
   });
   const [loading, setLoading] = useState(false);
@@ -105,7 +109,8 @@ export default function MessagesPage() {
   const [selectedConversation, setSelectedConversation] = useState(() => {
     try {
       const raw = localStorage.getItem('zt_selected_conv');
-      return raw ? JSON.parse(raw) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed?.isGroup ? parsed : null;
     } catch { return null; }
   });
 
@@ -218,9 +223,9 @@ export default function MessagesPage() {
       }
       const friendMap = buildFriendMap(activeAccount?.friends || []);
       const groupMap = buildGroupMap(activeAccount?.groups || []);
-      const nextConversations = items
+      const nextConversations = keepGroupConversations(items
         .map((conversation) => enrichConversation(conversation, friendMap, groupMap))
-        .filter(Boolean);
+        .filter(Boolean));
 
       console.log('[MessagesPage] Loaded', nextConversations.length, 'conversations from', source);
       setConversations((prev) => {
@@ -271,6 +276,8 @@ export default function MessagesPage() {
         let next = Array.isArray(prev) ? [...prev] : [];
 
         for (const incoming of incomingMessages) {
+          if (!incoming?.isGroup) continue;
+
           const conversationId = String(
             incoming?.threadId ||
             (incoming?.isGroup
@@ -337,8 +344,15 @@ export default function MessagesPage() {
 
   // Persist selected conversation
   const handleSelectConversation = useCallback((conv) => {
-    setSelectedConversation(conv);
-    try { localStorage.setItem('zt_selected_conv', JSON.stringify(conv)); } catch {}
+    const next = conv?.isGroup ? conv : null;
+    setSelectedConversation(next);
+    try {
+      if (next) {
+        localStorage.setItem('zt_selected_conv', JSON.stringify(next));
+      } else {
+        localStorage.removeItem('zt_selected_conv');
+      }
+    } catch {}
   }, []);
 
   // Reset conversations + selected chat when account changes
@@ -352,7 +366,7 @@ export default function MessagesPage() {
   const summary = useMemo(() => ({
     total: conversations.length,
     unread: conversations.reduce((total, item) => total + Number(item.unreadCount || 0), 0),
-    direct: conversations.filter((item) => !item.isGroup).length,
+    direct: 0,
     groups: conversations.filter((item) => item.isGroup).length,
   }), [conversations]);
 
