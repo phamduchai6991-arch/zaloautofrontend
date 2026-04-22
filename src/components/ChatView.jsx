@@ -362,6 +362,91 @@ function fileToBase64(file) {
   });
 }
 
+function looksLikeImageUrl(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return (
+    /^blob:https?:\/\//.test(text)
+    || /\.(png|jpe?g|gif|webp|bmp|svg|jxl)(\?|$)/i.test(text)
+    || text.includes('photo-stal-')
+    || text.includes('photo-link-talk.')
+    || text.includes('-zpc.')
+    || text.includes('-zpcloud.')
+    || text.includes('/jxl/')
+  );
+}
+
+function findNestedMediaUrl(value, depth = 0) {
+  if (value == null || depth > 4) return '';
+
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return '';
+    if (looksLikeImageUrl(text)) return text;
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        return findNestedMediaUrl(JSON.parse(text), depth + 1);
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findNestedMediaUrl(item, depth + 1);
+      if (nested) return nested;
+    }
+    return '';
+  }
+
+  if (typeof value !== 'object') return '';
+
+  const directCandidates = [
+    value.hdUrl,
+    value.normalUrl,
+    value.thumb,
+    value.thumbSrc,
+    value.thumbUrl,
+    value.thumbnail,
+    value.image,
+    value.imageUrl,
+    value.photo,
+    value.photoUrl,
+    value.url,
+    value.href,
+    value.link,
+    value.originalUrl,
+    value.downloadUrl,
+    value.src,
+    value.previewUrl,
+  ];
+
+  for (const candidate of directCandidates) {
+    const nested = findNestedMediaUrl(candidate, depth + 1);
+    if (nested) return nested;
+  }
+
+  for (const nestedCandidate of [
+    value.data,
+    value.params,
+    value.paramsExt,
+    value.meta,
+    value.extra,
+    value.attach,
+    value.attachment,
+    value.attachments,
+    value.content,
+    value.rawContent,
+  ]) {
+    const nested = findNestedMediaUrl(nestedCandidate, depth + 1);
+    if (nested) return nested;
+  }
+
+  return '';
+}
+
 function getAvatarLabel(message) {
   if (message.dName) return message.dName[0].toUpperCase();
   if (message.fromId && !/^[0-9]+$/.test(message.fromId)) return message.fromId[0].toUpperCase();
@@ -386,6 +471,14 @@ function extractMediaInfo(message) {
   const src = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
   if (!src) return null;
 
+  const containType = Number(
+    src?.paramsExt?.containType
+    || src?.containType
+    || src?.extra?.containType
+    || src?.data?.paramsExt?.containType
+    || 0
+  );
+
   const attachments = Array.isArray(src.attachments)
     ? src.attachments
     : (Array.isArray(src.attachment?.attachments) ? src.attachment.attachments : []);
@@ -408,8 +501,9 @@ function extractMediaInfo(message) {
   }
 
   // Image
-  const imgUrl = src.hdUrl || src.normalUrl || src.thumb || src.thumbSrc || src.imageUrl || src.photoUrl || src.thumbnail || src.image;
+  const imgUrl = findNestedMediaUrl(src);
   if (imgUrl) return { type: 'image', url: imgUrl, caption: src.caption || src.description || src.title || '' };
+  if (containType === 2) return { type: 'image', url: '', caption: src.caption || src.description || src.title || '[Hình ảnh]' };
 
   // Sticker
   if (src.stickerId || src.stickerUrl) return { type: 'sticker', url: src.stickerUrl || src.spriteUrl || '' };
@@ -425,7 +519,7 @@ function extractMediaInfo(message) {
   if (href) return { type: 'link', url: href, title: src.title || src.name || '', desc: src.description || src.desc || '', thumb: src.thumb || src.thumbUrl || src.thumbnail || src.image || '' };
 
   // Nested: check src.params, src.data, src.attach
-  for (const nested of [src.params, src.data, src.attach, src.attachment]) {
+  for (const nested of [src.params, src.paramsExt, src.data, src.extra, src.attach, src.attachment]) {
     if (nested && typeof nested === 'object') {
       const nestedResult = extractMediaInfo({ rawContent: nested });
       if (nestedResult) return nestedResult;
