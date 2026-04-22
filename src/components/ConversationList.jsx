@@ -45,6 +45,14 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
     );
   }, [conversations, search]);
 
+  const getPreviewText = (conversation) => {
+    const preview = String(conversation?.lastMessage || '').trim();
+    if (!preview) return 'Chưa có tin nhắn';
+    const sender = String(conversation?.lastSenderName || '').trim();
+    if (conversation?.isGroup && sender) return `${sender}: ${preview}`;
+    return preview;
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Box sx={{ p: 1.5 }}>
@@ -134,7 +142,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
                       noWrap
                       sx={{ flex: 1 }}
                     >
-                      {conversation.lastMessage || 'Chưa có tin nhắn'}
+                      {getPreviewText(conversation)}
                     </Typography>
                     {conversation.isPinned && (
                       <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', flexShrink: 0 }} />

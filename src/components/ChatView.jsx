@@ -13,8 +13,6 @@ import {
 import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import GroupIcon from '@mui/icons-material/Group';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import { zFetch, onIncomingMessages } from '../utils/extensionBridge';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 
@@ -138,6 +136,21 @@ function hasRenderableMessageContent(message) {
 
 function hasUsableMessageList(messages) {
   return Array.isArray(messages) && messages.some(hasRenderableMessageContent);
+}
+
+function buildConversationPreviewMessage(conversation) {
+  const content = String(conversation?.lastMessage || '').trim();
+  if (!content) return null;
+  return {
+    msgId: String(conversation?.lastMsgId || `preview_${conversation?.id || conversation?.rawId || 'conv'}`),
+    fromId: String(conversation?.lastSenderId || ''),
+    toId: String(conversation?.id || conversation?.rawId || ''),
+    content,
+    rawContent: null,
+    msgType: String(conversation?.lastMsgType || 'text'),
+    ts: Number(conversation?.lastMsgTime || 0) || Date.now(),
+    dName: String(conversation?.lastSenderName || ''),
+  };
 }
 
 function getAvatarLabel(message) {
@@ -424,7 +437,7 @@ function setCachedMessages(convId, messages) {
   } catch { /* storage full, ignore */ }
 }
 
-export default function ChatView({ conversation, account, accountReady = false, extensionActive }) {
+export default function ChatView({ conversation, account, accountReady = false, refreshToken = 0 }) {
   const convId = conversation?.id || conversation?.rawId || null;
   const [messages, setMessages] = useState(() => getCachedMessages(convId));
   const [loading, setLoading] = useState(false);
@@ -437,7 +450,6 @@ export default function ChatView({ conversation, account, accountReady = false, 
 
   const selfId = String(account?.userId || '');
   const conversationIdRef = useRef(convId);
-  const runDiagnosticRef = useRef(null);
 
   const fetchMessages = useCallback(async (isPolling = false) => {
     if (!conversation || !account || !accountReady) return;
@@ -457,7 +469,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     
     try {
       if (!isPolling) {
-        console.log('[ChatView] Fetching messages for', convId, 'isGroup:', conversation.isGroup, 'backend:', hasBackend, 'extension:', extensionActive);
+        console.log('[ChatView] Fetching messages for', convId, 'isGroup:', conversation.isGroup, 'backend:', hasBackend);
       }
 
       let response = null;
@@ -498,39 +510,6 @@ export default function ChatView({ conversation, account, accountReady = false, 
         }
       }
 
-      const shouldTryExtension = !response?.ok || !Array.isArray(response?.data) || response.data.length === 0;
-
-      // Strategy 2: Extension fallback when backend is unavailable/empty.
-      if (shouldTryExtension && extensionActive) {
-        const extResponse = await zFetch({
-          account,
-          // Non-intrusive mode: only use existing Zalo tabs, do not auto-create.
-          options: { allowCreateTab: false },
-          request: {
-            method: 'getMessageHistory',
-            args: {
-              threadId: convId,
-              isGroup: conversation.isGroup,
-              count: 30,
-            },
-            meta: {
-              conversation: {
-                id: conversation.id || conversation.rawId || '',
-                rawId: conversation.rawId || '',
-                displayName: conversation.displayName || '',
-                isGroup: conversation.isGroup,
-              },
-            },
-          },
-        });
-
-        if (extResponse?.ok || !response) {
-          response = extResponse;
-        } else if (!response?.ok && extResponse?.error) {
-          response = extResponse;
-        }
-      }
-
       // Stale check: don't update if user switched conversations
       if (conversationIdRef.current !== convId) return;
 
@@ -547,8 +526,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
           console.warn('[ChatView] getMessageHistory returned placeholder-only data for', convId);
           if (!isPolling) {
             setMessages([]);
-            setFetchError('Đã nhận được lịch sử nhưng chưa đọc ra nội dung thực. Đang chẩn đoán...');
-            runDiagnosticRef.current?.();
+            setFetchError('Đã nhận được lịch sử nhưng chưa đọc ra nội dung thực từ backend.');
           }
           return;
         }
@@ -572,47 +550,32 @@ export default function ChatView({ conversation, account, accountReady = false, 
       } else if (!isPolling && response && !response.ok) {
         console.warn('[ChatView] getMessageHistory failed:', response.error);
         setFetchError(response.error || 'Không lấy được tin nhắn.');
-        // Auto-run diagnostic on failure
-        if (extensionActive) runDiagnosticRef.current?.();
-      } else if (!isPolling && response?.ok && (!response.data || response.data.length === 0)) {
-        // API succeeded but returned empty — auto-diagnose
-        setFetchError('API trả về 0 tin nhắn. Đang chẩn đoán...');
-        if (extensionActive) runDiagnosticRef.current?.();
+      } else if (response?.ok && (!response.data || response.data.length === 0)) {
+        const previewMsg = buildConversationPreviewMessage(conversation);
+        if (previewMsg && hasRenderableMessageContent(previewMsg)) {
+          setMessages((prev) => {
+            const prevSignature = prev.map(buildMessageSignature).join('|');
+            const nextList = [previewMsg];
+            const nextSignature = nextList.map(buildMessageSignature).join('|');
+            if (prevSignature === nextSignature) return prev;
+            setCachedMessages(convId, nextList);
+            return nextList;
+          });
+          if (!isPolling) setFetchError(null);
+        } else if (!isPolling) {
+          setFetchError('API backend trả về 0 tin nhắn.');
+        }
       }
     } catch (err) {
       console.error('[ChatView] fetchMessages error:', err);
       if (!isPolling) {
         setMessages([]);
         setFetchError(err?.message || 'Lỗi không xác định khi tải tin nhắn.');
-        if (extensionActive) runDiagnosticRef.current?.();
       }
     } finally {
       if (!isPolling) setLoading(false);
     }
-  }, [conversation, extensionActive, account, accountReady]);
-
-  const [diagResult, setDiagResult] = useState(null);
-  const runDiagnostic = useCallback(async () => {
-    if (!conversation || !extensionActive || !account) return;
-    if (diagResult) return; // already ran
-    const convId = conversation.id || conversation.rawId;
-    try {
-      const response = await zFetch({
-        account,
-        options: { allowCreateTab: false },
-        request: {
-          method: 'debugGetMessageHistory',
-          args: { threadId: convId, isGroup: conversation.isGroup, count: 3 },
-        },
-      });
-      console.log('[ChatView] Diagnostic result:', response?.data);
-      setDiagResult(response?.data || { error: 'No data returned' });
-    } catch (err) {
-      console.error('[ChatView] Diagnostic error:', err);
-      setDiagResult({ error: err?.message || String(err) });
-    }
-  }, [conversation, extensionActive, account, diagResult]);
-  runDiagnosticRef.current = runDiagnostic;
+  }, [conversation, account, accountReady]);
 
   // Initial load when conversation changes — restore cache then fetch from backend/extension.
   useEffect(() => {
@@ -622,48 +585,23 @@ export default function ChatView({ conversation, account, accountReady = false, 
     setMessages(cached);
     setInputValue('');
     setFetchError(null);
-    setDiagResult(null);
-    if (id && accountReady && (Boolean(API_BASE) || extensionActive)) fetchMessages(false);
+    if (id && accountReady && Boolean(API_BASE)) fetchMessages(false);
   }, [fetchMessages, conversation]);
 
-  // Listen for real-time incoming messages via WebSocket interceptor
+  // Immediate refresh when parent detects a backend realtime delta for current conversation.
   useEffect(() => {
-    const convId = conversation?.id || conversation?.rawId;
-    if (!convId) return;
-
-    const unsub = onIncomingMessages((incomingMsgs) => {
-      // Filter only messages for this conversation
-      const relevant = incomingMsgs.filter((m) => {
-        // Match by threadId (computed in zalo-main.js)
-        if (m.threadId === convId) return true;
-        // Also match by fromId/toId directly
-        if (m.fromId === convId || m.toId === convId) return true;
-        return false;
-      });
-
-      if (relevant.length === 0) return;
-
-      console.log('[ChatView] Real-time messages received:', relevant.length, 'for', convId);
-      setMessages((prev) => {
-        const existingIds = new Set(prev.map((m) => m.msgId));
-        const newMsgs = relevant.filter((m) => m.msgId && !existingIds.has(m.msgId));
-        if (newMsgs.length === 0) return prev;
-        const merged = [...prev, ...newMsgs].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-        setCachedMessages(convId, merged);
-        return merged;
-      });
-    });
-
-    return unsub;
-  }, [conversation]);
+    if (!conversation || !account || !accountReady) return;
+    if (!API_BASE) return;
+    fetchMessages(true);
+  }, [refreshToken, conversation, account, accountReady, fetchMessages]);
 
   // Fallback poll every 15s (in case WebSocket interceptor misses something)
   useEffect(() => {
     if (!conversation || !account || !accountReady) return;
-    if (!API_BASE && !extensionActive) return;
-    const intervalId = setInterval(() => fetchMessages(true), 15000);
+    if (!API_BASE) return;
+    const intervalId = setInterval(() => fetchMessages(true), 5000);
     return () => clearInterval(intervalId);
-  }, [conversation, extensionActive, account, accountReady, fetchMessages]);
+  }, [conversation, account, accountReady, fetchMessages]);
 
   // Track scroll position — auto-scroll only if user is near bottom
   const handleScroll = useCallback(() => {
@@ -740,33 +678,12 @@ export default function ChatView({ conversation, account, accountReady = false, 
           }
         } catch (backendErr) {
           if (sent) throw backendErr;
-          // Fall through to extension
-          console.warn('[ChatView] Backend send failed, trying extension:', backendErr.message);
+          console.warn('[ChatView] Backend send failed:', backendErr.message);
         }
       }
 
-      // Strategy 2: Extension fallback
-      if (!sent && extensionActive) {
-        const response = await zFetch({
-          account,
-          options: { allowCreateTab: false },
-          request: {
-            method: 'sendZText',
-            args: {
-              toId: conversation.id || conversation.rawId,
-              message: text,
-              isGroup: Boolean(conversation.isGroup),
-              clientId: tempMsg.msgId,
-            },
-            meta: { job: { id: tempMsg.msgId, zid: conversation.id || conversation.rawId, content: text } },
-          },
-        });
-        if (response?.ok) sent = true;
-        else throw new Error(response?.error || 'Extension gửi tin nhắn thất bại.');
-      }
-
       if (!sent) {
-        throw new Error('Không có kênh gửi tin nhắn khả dụng. Hãy kiểm tra kết nối server hoặc extension.');
+        throw new Error('Không có kênh gửi tin nhắn khả dụng qua backend.');
       }
 
       setMessages((prev) =>
@@ -786,7 +703,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     } finally {
       setSending(false);
     }
-  }, [inputValue, sending, conversation, selfId, account, accountReady, extensionActive]);
+  }, [inputValue, sending, conversation, selfId, account, accountReady]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -845,26 +762,8 @@ export default function ChatView({ conversation, account, accountReady = false, 
                 ? 'Tài khoản chưa sẵn sàng để tải lịch sử tin nhắn. Hãy hoàn tất đồng bộ với extension.'
                 : fetchError
                   ? `Lỗi: ${fetchError}`
-                    : 'Chưa có dữ liệu tin nhắn. Hãy đảm bảo có tab chat.zalo.me đang mở đúng tài khoản, hoặc dùng backend đã đồng bộ phiên đầy đủ.'}
+                    : 'Chưa có dữ liệu tin nhắn từ backend.'}
             </Typography>
-            {accountReady && extensionActive && (
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<BugReportIcon />}
-                onClick={runDiagnostic}
-                sx={{ mt: 2 }}
-              >
-                Chẩn đoán lỗi
-              </Button>
-            )}
-            {diagResult && (
-              <Paper sx={{ mt: 2, p: 1.5, textAlign: 'left', maxHeight: 300, overflow: 'auto' }}>
-                <Typography variant="caption" component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>
-                  {JSON.stringify(diagResult, null, 2)}
-                </Typography>
-              </Paper>
-            )}
           </Box>
         ) : (
           messages.filter(hasRenderableMessageContent).map((msg, index, arr) => {
