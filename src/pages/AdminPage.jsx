@@ -43,6 +43,9 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
+  MenuBook as GuideIcon,
+  Save as SaveIcon,
+  SmartDisplay as VideoIcon,
 } from '@mui/icons-material';
 import { notifySubscriptionChanged } from '../contexts/SubscriptionContext';
 
@@ -84,6 +87,34 @@ function fmtDate(iso) {
 function fmtDateTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function parseVideoInput(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function toYoutubeEmbedUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || '').trim());
+    const host = url.hostname.toLowerCase();
+
+    if (host.includes('youtu.be')) {
+      const id = url.pathname.replace('/', '').trim();
+      return id ? `https://www.youtube.com/embed/${id}` : '';
+    }
+
+    if (host.includes('youtube.com')) {
+      if (url.pathname.startsWith('/embed/')) return url.toString();
+      const videoId = url.searchParams.get('v');
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
+    }
+  } catch {
+    return '';
+  }
+  return '';
 }
 
 function StatCard({ icon, label, value, color = 'primary', sub }) {
@@ -132,6 +163,11 @@ export default function AdminPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [glFilterCat, setGlFilterCat] = useState('');
   const [editingGroup, setEditingGroup] = useState(null);
+  const [guideLoading, setGuideLoading] = useState(false);
+  const [guideSaving, setGuideSaving] = useState(false);
+  const [guideText, setGuideText] = useState('');
+  const [guideVideoInput, setGuideVideoInput] = useState('');
+  const [guideUpdatedAt, setGuideUpdatedAt] = useState('');
 
   const adminFetch = useCallback(
     async (path, currentToken = token) => {
@@ -180,6 +216,23 @@ export default function AdminPage() {
     [adminFetch, token],
   );
 
+  const loadGuideContent = useCallback(
+    async (currentToken = token) => {
+      setGuideLoading(true);
+      try {
+        const data = await adminFetch('/api/admin/guide-content', currentToken);
+        const guide = data?.guide || {};
+        const videoUrls = Array.isArray(guide.videoUrls) ? guide.videoUrls : [];
+        setGuideText(String(guide.content || ''));
+        setGuideVideoInput(videoUrls.join('\n'));
+        setGuideUpdatedAt(String(guide.updatedAt || ''));
+      } finally {
+        setGuideLoading(false);
+      }
+    },
+    [adminFetch, token],
+  );
+
   React.useEffect(() => {
     if (!token || authenticated) return;
 
@@ -206,6 +259,45 @@ export default function AdminPage() {
   React.useEffect(() => {
     if (authenticated && tab === 2) loadGroupLibrary();
   }, [authenticated, tab, loadGroupLibrary]);
+
+  React.useEffect(() => {
+    if (authenticated && tab === 3) {
+      loadGuideContent().catch((e) => setError(getAdminErrorMessage(e)));
+    }
+  }, [authenticated, tab, loadGuideContent]);
+
+  const handleSaveGuide = async () => {
+    setGuideSaving(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/guide-content`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          content: guideText,
+          videoUrls: parseVideoInput(guideVideoInput),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Không lưu được nội dung hướng dẫn.');
+      }
+      const updatedGuide = data?.guide || {};
+      const urls = Array.isArray(updatedGuide.videoUrls) ? updatedGuide.videoUrls : [];
+      setGuideText(String(updatedGuide.content || ''));
+      setGuideVideoInput(urls.join('\n'));
+      setGuideUpdatedAt(String(updatedGuide.updatedAt || ''));
+      setSuccessMessage('Đã lưu nội dung Hướng Dẫn Sử Dụng thành công.');
+    } catch (e) {
+      setError(getAdminErrorMessage(e));
+    } finally {
+      setGuideSaving(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) return;
@@ -568,6 +660,7 @@ export default function AdminPage() {
         <Tab label={`Người dùng (${users?.length ?? '…'})`} />
         <Tab label={`Đơn hàng (${orders?.length ?? '…'})`} />
         <Tab icon={<LibraryIcon />} iconPosition="start" label={`Thư viện nhóm (${libraryGroups.length})`} />
+        <Tab icon={<GuideIcon />} iconPosition="start" label="Hướng dẫn sử dụng" />
       </Tabs>
 
       {tab === 0 && (
@@ -901,6 +994,92 @@ export default function AdminPage() {
             </Stack>
           )}
         </Box>
+      )}
+
+      {tab === 3 && (
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          {guideLoading ? (
+            <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" fontWeight={700}>
+                Chỉnh sửa thủ công nội dung trang Hướng Dẫn Sử Dụng
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Nội dung này sẽ hiển thị lên đầu trang Hướng Dẫn Sử Dụng cho toàn bộ người dùng.
+              </Typography>
+
+              <TextField
+                label="Nội dung hướng dẫn"
+                multiline
+                minRows={10}
+                maxRows={24}
+                fullWidth
+                value={guideText}
+                onChange={(e) => setGuideText(e.target.value)}
+                placeholder="Nhập hướng dẫn chi tiết..."
+              />
+
+              <TextField
+                label="Video YouTube (mỗi dòng 1 link)"
+                multiline
+                minRows={4}
+                maxRows={10}
+                fullWidth
+                value={guideVideoInput}
+                onChange={(e) => setGuideVideoInput(e.target.value)}
+                placeholder={'https://www.youtube.com/watch?v=...\\nhttps://youtu.be/...'}
+              />
+
+              {parseVideoInput(guideVideoInput).length > 0 && (
+                <Stack spacing={1}>
+                  <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <VideoIcon fontSize="small" /> Xem trước video embed
+                  </Typography>
+                  {parseVideoInput(guideVideoInput).slice(0, 3).map((url, idx) => {
+                    const embed = toYoutubeEmbedUrl(url);
+                    if (!embed) {
+                      return (
+                        <Alert key={`invalid_${idx}`} severity="warning">
+                          Link không hợp lệ hoặc không phải YouTube: {url}
+                        </Alert>
+                      );
+                    }
+                    return (
+                      <Box key={`embed_${idx}`} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                        <Box
+                          component="iframe"
+                          src={embed}
+                          title={`guide_video_preview_${idx}`}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          referrerPolicy="strict-origin-when-cross-origin"
+                          allowFullScreen
+                          sx={{ width: '100%', height: { xs: 220, md: 300 }, border: 0 }}
+                        />
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              )}
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Typography variant="caption" color="text.secondary">
+                  Cập nhật lần cuối: {fmtDateTime(guideUpdatedAt)}
+                </Typography>
+                <Button
+                  variant="contained"
+                  onClick={handleSaveGuide}
+                  disabled={guideSaving}
+                  startIcon={guideSaving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
+                >
+                  {guideSaving ? 'Đang lưu...' : 'Lưu hướng dẫn'}
+                </Button>
+              </Box>
+            </Stack>
+          )}
+        </Paper>
       )}
 
       {/* ─── Edit Category Dialog ─── */}

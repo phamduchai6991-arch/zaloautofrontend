@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -32,6 +32,29 @@ import {
   Schedule as ScheduleIcon,
   AutoAwesome as AIIcon,
 } from '@mui/icons-material';
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+
+function toYoutubeEmbedUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || '').trim());
+    const host = url.hostname.toLowerCase();
+
+    if (host.includes('youtu.be')) {
+      const id = url.pathname.replace('/', '').trim();
+      return id ? `https://www.youtube.com/embed/${id}` : '';
+    }
+
+    if (host.includes('youtube.com')) {
+      if (url.pathname.startsWith('/embed/')) return url.toString();
+      const videoId = url.searchParams.get('v');
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
 
 const SECTIONS = [
   {
@@ -414,6 +437,38 @@ const SECTIONS = [
 
 export default function GuidePage() {
   const [expanded, setExpanded] = useState('install');
+  const [manualGuide, setManualGuide] = useState({
+    content: '',
+    videoUrls: [],
+    updatedAt: '',
+  });
+
+  useEffect(() => {
+    let active = true;
+    if (!API_BASE) return undefined;
+
+    fetch(`${API_BASE}/api/guide/content`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data?.ok) return;
+        const guide = data.guide || {};
+        setManualGuide({
+          content: String(guide.content || ''),
+          videoUrls: Array.isArray(guide.videoUrls) ? guide.videoUrls : [],
+          updatedAt: String(guide.updatedAt || ''),
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const embedVideos = useMemo(
+    () => (Array.isArray(manualGuide.videoUrls) ? manualGuide.videoUrls.map((url) => ({ raw: url, embed: toYoutubeEmbedUrl(url) })).filter((item) => item.embed) : []),
+    [manualGuide.videoUrls],
+  );
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto', py: 4, px: 3 }}>
@@ -424,6 +479,41 @@ export default function GuidePage() {
         AutoZalo v3.0.0 — Công cụ quản lý Zalo đa tài khoản
       </Typography>
       <Chip label="v3.0.0" size="small" sx={{ mb: 4, fontWeight: 600 }} />
+
+      {(manualGuide.content.trim() || embedVideos.length > 0) && (
+        <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.25 }}>
+            Hướng dẫn cập nhật từ quản trị viên
+          </Typography>
+          {manualGuide.content.trim() && (
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, mb: embedVideos.length > 0 ? 2 : 0 }}>
+              {manualGuide.content}
+            </Typography>
+          )}
+          {embedVideos.length > 0 && (
+            <Stack spacing={1.5}>
+              {embedVideos.map((video, index) => (
+                <Box key={`guide_video_${index}`} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                  <Box
+                    component="iframe"
+                    src={video.embed}
+                    title={`guide_video_${index}`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    allowFullScreen
+                    sx={{ width: '100%', height: { xs: 220, md: 360 }, border: 0 }}
+                  />
+                </Box>
+              ))}
+            </Stack>
+          )}
+          {manualGuide.updatedAt && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+              Cập nhật lần cuối: {new Date(manualGuide.updatedAt).toLocaleString('vi-VN')}
+            </Typography>
+          )}
+        </Paper>
+      )}
 
       <Stack spacing={1.5}>
         {SECTIONS.map((section) => (
