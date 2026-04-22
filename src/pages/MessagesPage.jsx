@@ -182,7 +182,8 @@ export default function MessagesPage() {
         if (!extensionActive) return null;
         const response = await zFetch({
           account: activeAccount,
-          options: { allowCreateTab: false },
+          // Allow extension to create a minimized action tab if none exists yet.
+          options: { allowCreateTab: true },
           request: { method: 'getConversationList', args: {} },
         });
         if (response?.ok) {
@@ -256,7 +257,7 @@ export default function MessagesPage() {
     }
   }, [activeAccount, activeAccountReady, extensionActive, isActive, planKey, syncState.phase]);
 
-  // Auto-refresh on mount (uses allowCreateTab:false so won't open new Zalo window)
+  // Auto-refresh on mount (extension may create a minimized action tab when needed)
   useEffect(() => { refreshConversations({ silent: false }); }, [refreshConversations]);
 
   useEffect(() => {
