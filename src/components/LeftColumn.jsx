@@ -2040,7 +2040,15 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
                 Bạn bè: {syncState.summary?.friendCount || 0} | Nhóm: {syncState.summary?.groupCount || 0}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Nếu đồng ý, tài khoản sẽ được đồng bộ vào web app và dùng làm phiên thao tác cho các chức năng nhắn tin, quản lý hội thoại và action runtime.
+                Hệ thống sẽ tự động xác nhận đồng bộ sau vài giây. Nếu cần, bạn vẫn có thể bấm xác nhận thủ công ngay.
+              </Typography>
+              {syncState.error ? (
+                <Alert severity="warning" sx={{ mt: 1.5 }}>
+                  {syncState.error}
+                </Alert>
+              ) : null}
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Sau khi xác nhận thành công, tài khoản sẽ được đồng bộ vào web app và dùng làm phiên thao tác cho các chức năng nhắn tin, quản lý hội thoại và action runtime.
               </Typography>
             </>
           ) : syncState.phase === 'syncing_account' ? (
@@ -2065,7 +2073,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
           {syncState.phase === 'awaiting_sync_confirmation' ? (
             <>
               <Button onClick={handleCancelPendingSync} color="inherit">Hủy</Button>
-              <Button onClick={handleConfirmPendingSync} variant="contained">Xác nhận đồng bộ</Button>
+              <Button onClick={handleConfirmPendingSync} variant="contained">Đồng bộ ngay</Button>
             </>
           ) : (
             <Button onClick={stopPolling} color="error" disabled={syncState.phase === 'syncing_account'}>Hủy</Button>
