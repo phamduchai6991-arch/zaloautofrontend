@@ -879,6 +879,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
               conversationId: convId,
               isGroup: Boolean(conversation.isGroup),
               count: 30,
+              forceHydrate: Boolean(isPolling),
             }),
           });
 
@@ -989,7 +990,7 @@ export default function ChatView({ conversation, account, accountReady = false, 
     fetchMessages(true);
   }, [refreshToken, conversation, account, accountReady, fetchMessages]);
 
-  // Fallback poll every 15s (in case WebSocket interceptor misses something)
+  // Fallback poll every 5s (in case realtime update misses something)
   useEffect(() => {
     if (!conversation || !account || !accountReady) return;
     if (!API_BASE) return;
