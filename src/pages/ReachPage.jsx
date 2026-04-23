@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import LeftColumn from '../components/LeftColumn';
 import RightColumn from '../components/RightColumn';
-import { onExtensionMessage } from '../utils/extensionBridge';
 import { ACTION_DEFAULTS } from '../utils/reachActionConfig';
 
 const CAMPAIGN_STORAGE_KEY = 'zalotool_campaign_state';
@@ -46,17 +45,6 @@ function prependRecent(existing, incoming) {
   }).slice(0, 300);
 }
 
-function applyJobUpdate(items, jobId, changes) {
-  return items.map((item) => {
-    if (item?.id !== jobId) return item;
-    return {
-      ...item,
-      ...changes,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-}
-
 export default function ReachPage() {
   const [actionState, setActionState] = useState(ACTION_DEFAULTS);
   const [selection, setSelection] = useState({
@@ -72,23 +60,6 @@ export default function ReachPage() {
   useEffect(() => {
     localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(campaignState));
   }, [campaignState]);
-
-  useEffect(() => {
-    const unsubscribe = onExtensionMessage((msg) => {
-      if (msg.type !== 'ZALOTOOL_MESSAGE_JOB_UPDATE' || !msg.data?.jobId || !msg.data?.changes) {
-        return;
-      }
-
-      setCampaignState((prev) => ({
-        actionJobs: prev.actionJobs,
-        inviteJobs: prev.inviteJobs,
-        messageJobs: applyJobUpdate(prev.messageJobs, msg.data.jobId, msg.data.changes),
-        scheduledJobs: applyJobUpdate(prev.scheduledJobs, msg.data.jobId, msg.data.changes),
-      }));
-    });
-
-    return unsubscribe;
-  }, []);
 
   const handleCampaignCommit = (payload) => {
     setCampaignState((prev) => ({
