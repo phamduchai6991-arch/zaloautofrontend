@@ -857,11 +857,19 @@ export function AccountProvider({ children }) {
     if (!API_BASE) return null;
 
     try {
-      const res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account: acct }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/zalo/account/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: acct }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const result = await res.json();
       if (!result?.ok || !result.data) {
@@ -908,6 +916,9 @@ export function AccountProvider({ children }) {
     return patch;
     } catch (err) {
       console.warn('[AccountContext] refreshAccountViaBackend failed:', err?.message || err);
+      if (err?.name === 'AbortError') {
+        throw new Error('Đồng bộ tài khoản mất quá nhiều thời gian (>90s). Kiểm tra kết nối hoặc thử lại.');
+      }
       throw err;
     }
   }, [accounts, activeAccountIndex, getAuthHeaders, googleUserId, updateAccountById]);

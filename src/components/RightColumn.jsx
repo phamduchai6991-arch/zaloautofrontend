@@ -637,7 +637,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       return;
     }
 
-    if (Array.isArray(groupMembersCache[groupId])) {
+    if (Array.isArray(groupMembersCache[groupId]) && groupMembersCache[groupId].length > 0) {
       setGroupMembersLoading(false);
       setGroupMembersError('');
       return;
