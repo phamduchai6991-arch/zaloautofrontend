@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   cancelAccountSync,
-  checkExtension,
   checkExtensionStatus,
   closeIncognito,
   confirmAccountSync,

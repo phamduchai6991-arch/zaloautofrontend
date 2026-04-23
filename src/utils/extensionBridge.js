@@ -210,11 +210,6 @@ export function checkExtensionStatus(timeoutMs = 2500) {
   });
 }
 
-/** Check if extension is installed and active. */
-export function checkExtension() {
-  return checkExtensionStatus().then((status) => Boolean(status?.active));
-}
-
 /** Ask extension to open incognito window for Zalo login. */
 export function openZaloLogin(data = {}) {
   return requestExtension('OPEN_ZALO_LOGIN', data, 10000);
@@ -233,80 +228,6 @@ export function cancelAccountSync(requestId, reason = '') {
   return requestExtension('CANCEL_ACCOUNT_SYNC', { requestId, reason }, 10000);
 }
 
-export function executeMessageJobs(payload) {
-  return requestExtension('EXECUTE_MESSAGE_JOBS', { ...payload, options: { allowCreateTab: false } }, 15000);
-}
-
-export function stopMessageJobs(reason = '') {
-  return requestExtension('STOP_MESSAGE_BATCH', { reason }, 10000);
-}
-
 export function getZaloCommonData(payload) {
   return requestExtension('Z_GET_COMMON_DATA', payload, 70000);
-}
-
-export function zFetch(payload) {
-  return requestExtension('Z_FETCH', payload, 70000);
-}
-
-export function resolveGroupMembersViaExtension(payload) {
-  return zFetch({
-    account: payload?.account,
-    options: {
-      allowCreateTab: payload?.allowCreateTab !== false,
-    },
-    request: {
-      method: 'resolveGroupMembers',
-      args: {
-        groups: Array.isArray(payload?.groups) ? payload.groups : [],
-        accountUserId: payload?.account?.userId || '',
-      },
-    },
-  });
-}
-
-export function resolveUserTargetsViaExtension(payload) {
-  return zFetch({
-    account: payload?.account,
-    request: {
-      method: 'resolveUserTargets',
-      args: {
-        queries: Array.isArray(payload?.queries) ? payload.queries : [],
-        accountUserId: payload?.account?.userId || '',
-      },
-    },
-  });
-}
-
-export function runActionBatchViaExtension(payload) {
-  return zFetch({
-    account: payload?.account,
-    request: {
-      method: 'runActionBatch',
-      args: {
-        jobs: Array.isArray(payload?.jobs) ? payload.jobs : [],
-      },
-    },
-  });
-}
-
-export function findUserViaExtension(payload) {
-  return zFetch({
-    account: payload?.account,
-    request: {
-      method: 'findUser',
-      args: {
-        phone: payload?.phone || '',
-      },
-    },
-  });
-}
-
-/** Subscribe to real-time incoming Zalo messages. Returns unsubscribe fn. */
-export function onIncomingMessages(callback) {
-  return onExtensionMessage((msg) => {
-    if (msg.type === 'ZALO_INCOMING_MESSAGES' && Array.isArray(msg.data)) {
-      callback(msg.data);
-    }
-  });
 }
