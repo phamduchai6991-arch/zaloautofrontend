@@ -66,8 +66,7 @@ import {
   loadGroupLibraryEntries,
   subscribeGroupLibraryChange,
 } from '../utils/reachGroupLibraryStore';
-import { checkLocalZaloService, resolveGroupInviteTargetsViaBackend, resolveGroupInviteTargetsViaLocalService } from '../utils/localZaloService';
-import { resolveUserTargetsViaExtension } from '../utils/extensionBridge';
+import { checkLocalZaloService, resolveGroupInviteTargetsViaBackend, resolveGroupInviteTargetsViaLocalService, findUserByPhoneViaBackend, findUserByPhoneViaLocalService } from '../utils/localZaloService';
 import { useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
@@ -806,12 +805,36 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
 
     setPhoneLookupLoading(true);
     try {
-      const response = await resolveUserTargetsViaExtension({
-        account: activeAccount,
-        queries: newPhones,
-      });
+      let response = null;
+      let lastError = null;
+
+      // Strategy 1: Backend (cloud)
+      try {
+        response = await findUserByPhoneViaBackend({
+          account: activeAccount,
+          phones: newPhones,
+        });
+      } catch (err) {
+        lastError = err;
+      }
+
+      // Strategy 2: Local service fallback
       if (!response?.ok) {
-        throw new Error(response?.error || 'Extension không thể tra cứu SĐT/ZID.');
+        try {
+          const localReady = await checkLocalZaloService(1200);
+          if (localReady) {
+            response = await findUserByPhoneViaLocalService({
+              account: activeAccount,
+              phones: newPhones,
+            });
+          }
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      if (!response?.ok) {
+        throw new Error(response?.error || lastError?.message || 'Không thể tra cứu SĐT/ZID.');
       }
       const resultMap = new Map();
       (response?.data?.results || response?.results || []).forEach((r) => {
@@ -836,7 +859,7 @@ export default function RightColumn({ campaignState, actionState, onActionStateC
       setManualEntries(updated);
       try { localStorage.setItem('zt_manual_phones', JSON.stringify(updated)); } catch {}
     } catch {
-      // Fallback: keep raw entries if extension lookup fails
+      // Fallback: keep raw entries if lookup fails
       const rawEntries = newPhones.map((query) => ({ phone: query, zid: query }));
       const updated = [...rawEntries, ...manualEntries];
       setManualEntries(updated);

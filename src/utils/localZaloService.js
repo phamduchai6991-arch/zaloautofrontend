@@ -129,3 +129,7 @@ export function runAccountActionJobsViaLocalService(payload) {
 export function findUserByPhoneViaLocalService(payload) {
   return requestLocalZaloService('/api/zalo/find-user', payload, 60000);
 }
+
+export function findUserByPhoneViaBackend(payload) {
+  return requestBackendZaloService('/api/zalo/find-users', payload, 60000);
+}
