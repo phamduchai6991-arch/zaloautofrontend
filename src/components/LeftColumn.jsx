@@ -47,14 +47,6 @@ import {
 } from '@mui/icons-material';
 import { useAccount } from '../contexts/AccountContext';
 import { PLAN_LIMITS, useSubscription, canUsePlanFeature, getRequiredPlanLabel } from '../contexts/SubscriptionContext';
-import {
-  executeMessageJobs,
-  runActionBatchViaExtension,
-  stopMessageJobs,
-} from '../utils/extensionBridge';
-import {
-  sendFriendRequestRequest,
-} from '../utils/zaloRequestBuilder';
 import { normalizeFriendRow } from '../utils/zaloDataTransforms';
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
@@ -288,36 +280,6 @@ function buildActionFailureMessage(jobs, fallbackMessage) {
   return fallbackMessage;
 }
 
-function mergeServiceResultsIntoJobs(jobs, results, providerLabel) {
-  const resultMap = new Map(
-    (Array.isArray(results) ? results : []).map((item) => [item.jobId, item]),
-  );
-
-  return jobs.map((job) => {
-    const result = resultMap.get(job.id);
-    if (!result) {
-      return {
-        ...job,
-        provider: providerLabel,
-        status: 'failed',
-        statusLabel: 'Không có phản hồi',
-        error: 'Không nhận được phản hồi trạng thái từ extension.',
-      };
-    }
-
-    return {
-      ...job,
-      provider: result.provider || providerLabel,
-      status: result.status || (result.ok ? 'sent' : 'failed'),
-      statusLabel: result.statusLabel || (result.ok ? 'Đã gửi' : 'Gửi thất bại'),
-      error: result.error || '',
-      startedAt: result.startedAt || job.startedAt || new Date().toISOString(),
-      sentAt: result.sentAt || job.sentAt || null,
-      failedAt: result.failedAt || job.failedAt || null,
-      apiResult: result.apiResult || null,
-    };
-  });
-}
 
 function applyOptimisticActionResults(account, jobs) {
   if (!account) return null;
@@ -415,17 +377,6 @@ function applyOptimisticActionResults(account, jobs) {
   };
 }
 
-function parseDelayWindowMs(delayWindow) {
-  const match = String(delayWindow || '').match(/(\d+)\s*-\s*(\d+)/);
-  if (!match) return 0;
-  const from = Number(match[1]);
-  const to = Number(match[2]);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
-  const min = Math.min(from, to);
-  const max = Math.max(from, to);
-  return (min + Math.floor(Math.random() * (max - min + 1))) * 1000;
-}
-
 function hideProcessedContactRows(account, jobs, enabled) {
   if (!enabled || !account?.id) return;
   const ids = (Array.isArray(jobs) ? jobs : [])
@@ -434,12 +385,6 @@ function hideProcessedContactRows(account, jobs, enabled) {
     .filter(Boolean);
   if (!ids.length) return;
   hideContactsForAccount(account.id, ids);
-}
-
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 async function readNdjsonStream(response, onLine, onDone, waitIfPausedFn, stoppedRef) {
@@ -508,49 +453,6 @@ function mergeInviteResultsIntoJobs(jobs, results, providerLabel) {
   });
 }
 
-async function runInviteJobsViaExtension(account, jobs) {
-  const results = [];
-
-  for (let index = 0; index < jobs.length; index += 1) {
-    const job = jobs[index];
-    const startedAt = new Date().toISOString();
-
-    try {
-      const apiResult = await sendFriendRequestRequest(account, job);
-      results.push({
-        jobId: job.id,
-        ok: true,
-        status: 'sent',
-        statusLabel: 'Đã gửi lời mời',
-        provider: 'extension',
-        apiResult,
-        startedAt,
-        sentAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      results.push({
-        jobId: job.id,
-        ok: false,
-        status: 'failed',
-        statusLabel: 'Kết bạn thất bại',
-        provider: 'extension',
-        error: error.message,
-        startedAt,
-        failedAt: new Date().toISOString(),
-      });
-    }
-
-    if (index < jobs.length - 1) {
-      const waitMs = parseDelayWindowMs(job.delayWindow);
-      if (waitMs > 0) {
-        await delay(waitMs);
-      }
-    }
-  }
-
-  return { results };
-}
-
 export default function LeftColumn({ selection, actionState, campaignState, onCampaignCommit }) {
   const [ketBanEnabled, setKetBanEnabled] = useState(false);
   const [nhanTinEnabled, setNhanTinEnabled] = useState(false);
@@ -602,7 +504,6 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
   const handleStop = useCallback(() => {
     stoppedRef.current = true;
-    stopMessageJobs('Người dùng đã dừng thao tác.').catch(() => {});
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -1112,7 +1013,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
     if (!ketBanEnabled && !nhanTinEnabled && !hasSupportedActionSelected && unsupportedActionLabels.length > 0) {
       setFeedback({
         severity: 'warning',
-        message: `Các chức năng ${unsupportedActionLabels.join(', ')} hiện chưa được hỗ trợ ở chế độ extension-only.`,
+        message: `Các chức năng ${unsupportedActionLabels.join(', ')} hiện chưa được hỗ trợ.`,
       });
       return;
     }
@@ -1424,54 +1325,23 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         }
       }
 
-      // --- Strategy 2: Extension fallback ---
-      if (!backendActionOk) {
-        try {
-          setFeedback({
-            severity: 'info',
-            message: `Đang thực thi ${actionRecords.length} thao tác qua extension...`,
-          });
-
-          const extResult = await runActionBatchViaExtension({
-            account: activeAccount,
-            jobs: actionRecords,
-          });
-
-          const extData = extResult?.data || extResult || {};
-          const extResults = Array.isArray(extData.results) ? extData.results : [];
-
-          if (extResults.length > 0) {
-            backendActionOk = true;
-            extResults.forEach((data) => {
-              const originalJob = actionRecords.find((j) => j.id === data.jobId) || {};
-              onCampaignCommit?.({ actionJobs: [{ ...originalJob, ...data, provider: 'extension' }] });
-            });
-
-            const extAccepted = extResults.filter((r) => r.ok).length;
-            const extFailed = extResults.filter((r) => !r.ok).length;
-            actionSummary = {
-              severity: extFailed > 0 ? 'warning' : 'success',
-              message: `Extension đã xử lý ${extAccepted}/${actionRecords.length} thao tác.${extFailed > 0 ? ` ${extFailed} thất bại.` : ''}`,
-            };
-          }
-        } catch (extError) {
-          // Extension also failed
-        }
-      }
-
       if (!backendActionOk) {
         onCampaignCommit?.({
           actionJobs: actionRecords.map((job) => ({
             ...job,
             status: 'failed',
             statusLabel: 'Không thể thực thi',
-            error: 'Không có backend hoặc extension khả dụng.',
-            provider: 'extension',
+            error: API_BASE
+              ? 'Không thể thực thi thao tác qua backend.'
+              : 'Thiếu cấu hình VITE_BACKEND_URL nên không thể gọi backend.',
+            provider: 'server',
           })),
         });
         actionSummary = {
-          severity: 'warning',
-          message: 'Không thể thực thi thao tác: backend và extension đều không khả dụng.',
+          severity: 'error',
+          message: API_BASE
+            ? 'Không thể thực thi thao tác qua backend. Vui lòng kiểm tra server.'
+            : 'Thiếu cấu hình backend (VITE_BACKEND_URL).',
         };
       }
 
@@ -1566,36 +1436,24 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         }
       }
 
-      // --- Strategy 2: Extension fallback ---
       if (!backendInviteOk) {
-        try {
-          setFeedback({
-            severity: 'info',
-            message: `Đang gửi ${inviteRecords.length} lời mời kết bạn qua extension...`,
-          });
+        resolvedInviteJobs = inviteRecords.map((job) => ({
+          ...job,
+          status: 'failed',
+          statusLabel: 'Không thể gửi lời mời',
+          error: API_BASE
+            ? 'Không thể gửi lời mời kết bạn qua backend.'
+            : 'Thiếu cấu hình VITE_BACKEND_URL nên không thể gọi backend.',
+          provider: 'server',
+        }));
 
-          const response = await runInviteJobsViaExtension(activeAccount, inviteRecords);
-          resolvedInviteJobs = mergeInviteResultsIntoJobs(
-            inviteRecords,
-            response?.results,
-            'extension',
-          );
-        } catch (error) {
-          onCampaignCommit?.({
-            inviteJobs: inviteRecords.map((job) => ({
-              ...job,
-              status: 'failed',
-              statusLabel: 'Không thể gửi lời mời',
-              error: error.message,
-              provider: 'extension',
-            })),
-          });
-
-          inviteSummary = {
-            severity: 'error',
-            message: error.message,
-          };
-        }
+        onCampaignCommit?.({ inviteJobs: resolvedInviteJobs });
+        inviteSummary = {
+          severity: 'error',
+          message: API_BASE
+            ? 'Không thể gửi lời mời kết bạn qua backend. Vui lòng kiểm tra server.'
+            : 'Thiếu cấu hình backend (VITE_BACKEND_URL).',
+        };
       }
 
       if (resolvedInviteJobs.length > 0) {
@@ -1767,44 +1625,25 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
         }
       }
 
-      // --- Strategy 2: Extension fallback (browser tab automation) ---
       if (!backendOk) {
-        try {
-          setFeedback({
-            severity: 'info',
-            message: `Đang gửi ${messageRecords.length} tin nhắn qua extension...`,
-          });
+        onCampaignCommit?.({
+          messageJobs: messageRecords.map((job) => ({
+            ...job,
+            status: 'failed',
+            statusLabel: 'Không thể gửi tin nhắn',
+            error: API_BASE
+              ? 'Không thể gửi tin nhắn qua backend.'
+              : 'Thiếu cấu hình VITE_BACKEND_URL nên không thể gọi backend.',
+            provider: 'server',
+          })),
+        });
 
-          const response = await executeMessageJobs({
-            account: activeAccount,
-            jobs: messageRecords,
-          });
-
-          if (!response?.ok) {
-            throw new Error(response?.error || 'Extension không khởi chạy được batch nhắn tin.');
-          }
-
-          const acceptedCount = Number(response.accepted || messageRecords.length) || messageRecords.length;
-          messageSummary = {
-            severity: 'info',
-            message: `Extension đã nhận ${acceptedCount}/${messageRecords.length} tin nhắn. Kết quả sẽ cập nhật khi gửi xong.`,
-          };
-        } catch (error) {
-          onCampaignCommit?.({
-            messageJobs: messageRecords.map((job) => ({
-              ...job,
-              status: 'failed',
-              statusLabel: 'Không thể gửi tin nhắn',
-              error: error.message,
-              provider: 'extension',
-            })),
-          });
-
-          messageSummary = {
-            severity: 'error',
-            message: error.message,
-          };
-        }
+        messageSummary = {
+          severity: 'error',
+          message: API_BASE
+            ? 'Không thể gửi tin nhắn qua backend. Vui lòng kiểm tra server.'
+            : 'Thiếu cấu hình backend (VITE_BACKEND_URL).',
+        };
       }
     }
 
