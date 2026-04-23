@@ -237,6 +237,10 @@ export function executeMessageJobs(payload) {
   return requestExtension('EXECUTE_MESSAGE_JOBS', { ...payload, options: { allowCreateTab: false } }, 15000);
 }
 
+export function stopMessageJobs(reason = '') {
+  return requestExtension('STOP_MESSAGE_BATCH', { reason }, 10000);
+}
+
 export function getZaloCommonData(payload) {
   return requestExtension('Z_GET_COMMON_DATA', payload, 70000);
 }

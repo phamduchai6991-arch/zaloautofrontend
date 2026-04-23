@@ -50,6 +50,7 @@ import { PLAN_LIMITS, useSubscription, canUsePlanFeature, getRequiredPlanLabel }
 import {
   executeMessageJobs,
   runActionBatchViaExtension,
+  stopMessageJobs,
 } from '../utils/extensionBridge';
 import {
   sendFriendRequestRequest,
@@ -601,6 +602,7 @@ export default function LeftColumn({ selection, actionState, campaignState, onCa
 
   const handleStop = useCallback(() => {
     stoppedRef.current = true;
+    stopMessageJobs('Người dùng đã dừng thao tác.').catch(() => {});
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
