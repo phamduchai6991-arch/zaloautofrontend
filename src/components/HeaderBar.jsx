@@ -214,7 +214,7 @@ export default function HeaderBar() {
               pointerEvents: 'none',
             }}
           >
-            Extension đã kết nối · v4.5.0
+            Extension đã kết nối · v5.0.0
           </Button>
         ) : (
           <Button
@@ -236,7 +236,7 @@ export default function HeaderBar() {
               height: 32,
             }}
           >
-            Tải và cài extension để web hoạt động trước · v4.5.0
+            Tải và cài extension để web hoạt động trước · v5.0.0
           </Button>
         )}
 
