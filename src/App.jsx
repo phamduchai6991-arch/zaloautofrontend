@@ -80,6 +80,13 @@ function Layout() {
   );
 }
 
+// Redirect onrender domain to canonical production domain
+const CANONICAL = 'https://autozalo.vn';
+const ONRENDER_ORIGINS = ['https://zaloautofrontend.onrender.com', 'https://autozalo-frontend.onrender.com'];
+if (ONRENDER_ORIGINS.includes(window.location.origin)) {
+  window.location.replace(CANONICAL + window.location.pathname + window.location.search + window.location.hash);
+}
+
 export default function App() {
   return (
     <BrowserRouter>
